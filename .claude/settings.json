@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make *)",
+      "Bash(pytest *)",
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(git *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(cd *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(find *)"
+    ]
+  }
+}
