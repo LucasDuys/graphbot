@@ -163,8 +163,8 @@ def _sequential_decomposition() -> str:
             {
                 "id": "read",
                 "description": "Read README.md file contents",
-                "domain": "file",
-                "task_type": "RETRIEVE",
+                "domain": "system",
+                "task_type": "THINK",
                 "complexity": 1,
                 "depends_on": [],
                 "provides": ["file_content"],
@@ -175,7 +175,7 @@ def _sequential_decomposition() -> str:
             {
                 "id": "parse",
                 "description": "Find TODO items in the file content",
-                "domain": "code",
+                "domain": "system",
                 "task_type": "THINK",
                 "complexity": 1,
                 "depends_on": ["read"],

@@ -47,6 +47,8 @@ handoff_requested: false
 - T051: FastAPI SSE server for streaming pipeline events (6 tests, committed 89dfa8f)
 
 - T052/T053: SSE client + real-time DAG visualization (Jotai store, SSE streaming, TaskInput, StatusBar, ResultPanel, ELK layout)
+- T062: Web scraping/search tools for DAG leaf execution (8 tests, committed d87a6b7)
+- T065: Tool registry + DAG executor wiring (15 tests, committed 4dbcff5)
 
 ## In-Flight Work
 None.

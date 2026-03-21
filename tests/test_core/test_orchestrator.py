@@ -396,8 +396,8 @@ class TestDataForwarding:
                 {
                     "id": "producer",
                     "description": "Produce data",
-                    "domain": "web",
-                    "task_type": "RETRIEVE",
+                    "domain": "system",
+                    "task_type": "THINK",
                     "complexity": 1,
                     "depends_on": [],
                     "provides": ["weather_ams"],
