@@ -9,9 +9,9 @@ from models.base import ModelProvider
 
 DEFAULT_MODEL_MAP: dict[int, str] = {
     1: "meta-llama/llama-3.1-8b-instruct",
-    2: "meta-llama/llama-4-scout-17b-16e-instruct",
-    3: "meta-llama/llama-3.3-70b-versatile",
-    4: "google/gemini-2.5-pro-preview",
+    2: "meta-llama/llama-4-scout",
+    3: "meta-llama/llama-3.3-70b-instruct",
+    4: "google/gemini-2.5-flash-preview",
     5: "google/gemini-2.5-pro-preview",
 }
 

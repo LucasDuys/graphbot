@@ -1,8 +1,8 @@
 # GraphBot Progress
 
 ## Current Phase
-**Phase 0: Pre-Implementation -- COMPLETE**
-Next: Begin Phase 1 (Foundation -- Graph + Types + Single Model)
+**Phase 1: Foundation -- COMPLETE**
+Next: Begin Phase 2 (Recursive Decomposition + Constrained JSON)
 
 ## Completed
 - [x] Full architecture design (2026-03-20)
@@ -26,8 +26,22 @@ Next: Begin Phase 1 (Foundation -- Graph + Types + Single Model)
 - [x] Added ADRs 011-016: observability, hybrid verification, LLM-as-judge, A/B comparison, longitudinal metrics, prompt engineering patterns
 - [x] Integrated 4 missing testing areas into TESTS.md: quality scoring, A/B comparison, pattern cache tracking, graph growth metrics
 
+## Phase 1 Completed (2026-03-21)
+- [x] T001: Environment setup -- pyproject.toml updated, kuzu/litellm/langsmith installed, Python 3.13 verified
+- [x] T002: Core types -- ExecutionResult/Pattern/GraphContext frozen, CompletionResult added, 20 tests
+- [x] T003: GraphStore schema creation -- 10 node + 12 edge tables, idempotent init, 7 tests
+- [x] T004: OpenRouter provider -- ModelProvider ABC, CompletionResult, error hierarchy, 10 tests
+- [x] T005: Graph CRUD -- create/get/update/delete nodes + edges, parameterized Cypher, 22 tests
+- [x] T006: Model router -- complexity-based selection, DEFAULT_MODEL_MAP, scale-ready, 9 tests
+- [x] T007: LangSmith observability -- litellm callback, silent degradation, 8 tests
+- [x] T008: Context assembly -- 2-hop traversal, token budget, active memory filtering, 13 tests
+- [x] T009: Entity resolution -- 3-layer (exact/Levenshtein/BM25), >90% accuracy on 50 pairs, 13 tests
+- [x] T010: Graph benchmarks -- bench_graph.py at 100-10K nodes, JSONL tracking, 9 tests
+- [x] T011: SimpleExecutor -- E2E path (graph context -> LLM call -> result), 5 tests
+- **Total: 111 new tests, all passing**
+
 ## In Progress
-_Nothing -- ready for Phase 1._
+_Nothing -- ready for Phase 2._
 
 ## Blocked
 _Nothing blocked._
@@ -52,10 +66,12 @@ _Nothing blocked._
 ## Metrics
 | Metric | Target | Current | Notes |
 |--------|--------|---------|-------|
-| Lines of code (new) | <8,000 | ~300 | types.py + schema.py + tests |
-| Test coverage | >80% | -- | Not yet running |
-| Simple task latency | <1s | -- | |
-| Complex task latency | <8s | -- | |
+| Lines of code (new) | <8,000 | ~1,200 | types + store + CRUD + context + resolver + provider + router + executor |
+| Test count | -- | 111 | All passing |
+| 2-hop query (100 nodes) | <1ms | ~13ms | Needs optimization (full table scan approach) |
+| Context assembly (100 nodes) | <10ms | ~23ms | Needs indexed queries |
+| Entity resolution (100 nodes) | <10ms | ~3ms | Meets target |
+| Simple task latency | <1s | -- | Needs integration test with real API |
 | API cost (simple) | $0.00 | -- | |
 
 ## Session Log
@@ -73,3 +89,17 @@ _Nothing blocked._
   - Decomposition needs constrained JSON output
 - Updated all ADRs and model references
 - Next session: Begin Phase 1 -- install Kuzu, implement graph store, wire up single model execution
+
+### 2026-03-21 -- Session 1: Phase 1 Foundation (complete)
+- Used Forge framework for spec/plan/execute pipeline
+- 11 tasks across 5 tiers, executed with full autonomy via parallel subagents
+- Built bottom-up: env -> types -> graph store -> provider -> CRUD -> router/langsmith -> context/resolver -> benchmarks/executor
+- Key implementation decisions:
+  - OpenRouter as single provider gateway (user provides API key)
+  - Raw Kuzu (no Graphiti) for maximum performance at scale
+  - TaskNode stays mutable (execution state), output types frozen
+  - 3-layer entity resolution: exact/Levenshtein/BM25 (no LLM calls)
+  - Context assembly via explicit per-edge-type queries (Kuzu v0.11.3 variable-length path limitations)
+- Benchmark results: entity resolution fast (3ms), 2-hop and context assembly need optimization (13-23ms at 100 nodes)
+- Optimization path: indexed lookups, cached entity lists, batched queries
+- Next session: Phase 2 -- recursive decomposition with constrained JSON output

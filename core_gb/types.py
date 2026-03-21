@@ -39,6 +39,10 @@ class TaskNode:
     Every task -- whether a single leaf operation or a complex multi-level tree --
     is represented as a TaskNode. Nodes declare typed data contracts via `provides`
     and `consumes` fields, enabling zero-copy data forwarding between dependent nodes.
+
+    TaskNode is intentionally mutable: it tracks execution state (status, output,
+    timing) that changes during pipeline processing. For safe concurrent reads,
+    use snapshot() to get a frozen copy.
     """
 
     id: str
@@ -72,9 +76,21 @@ class TaskNode:
     error: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
+class CompletionResult:
+    """Result from a single LLM completion call."""
+
+    content: str
+    model: str
+    tokens_in: int
+    tokens_out: int
+    latency_ms: float
+    cost: float
+
+
+@dataclass(frozen=True)
 class ExecutionResult:
-    """Result from executing a task tree."""
+    """Result from executing a task tree. Frozen for safe concurrent reads."""
 
     root_id: str
     output: str
@@ -83,19 +99,21 @@ class ExecutionResult:
     total_tokens: int = 0
     total_latency_ms: float = 0.0
     total_cost: float = 0.0
-    nodes: dict[str, TaskNode] = field(default_factory=dict)
-    errors: list[str] = field(default_factory=list)
+    context_tokens: int = 0
+    model_used: str = ""
+    nodes: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Pattern:
     """A reusable execution tree template extracted from completed tasks."""
 
     id: str
     trigger: str
     description: str
-    variable_slots: list[str] = field(default_factory=list)
-    tree_template: dict[str, Any] = field(default_factory=dict)
+    variable_slots: tuple[str, ...] = ()
+    tree_template: str = ""
     success_count: int = 0
     avg_tokens: float = 0.0
     avg_latency_ms: float = 0.0
@@ -103,14 +121,17 @@ class Pattern:
     last_used: datetime | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class GraphContext:
-    """Compact context assembled from the knowledge graph for a specific task."""
+    """Compact context assembled from the knowledge graph for a specific task.
+    Frozen for safe concurrent reads across parallel task execution.
+    """
 
     user_summary: str = ""
-    relevant_entities: list[dict[str, str]] = field(default_factory=list)
-    active_memories: list[str] = field(default_factory=list)
-    matching_patterns: list[Pattern] = field(default_factory=list)
+    relevant_entities: tuple[dict[str, str], ...] = ()
+    active_memories: tuple[str, ...] = ()
+    matching_patterns: tuple[Pattern, ...] = ()
+    total_tokens: int = 0
     token_count: int = 0
 
     def format(self) -> str:

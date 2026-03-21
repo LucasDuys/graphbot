@@ -100,10 +100,10 @@ class TestGraphContext:
     def test_format_context(self) -> None:
         ctx = GraphContext(
             user_summary="Lucas | CSE at TU/e",
-            relevant_entities=[
+            relevant_entities=(
                 {"type": "PROJECT", "name": "graphbot", "details": "Python 3.11"},
-            ],
-            active_memories=["Extended bachelor 3.5yr+ (since 2025-09)"],
+            ),
+            active_memories=("Extended bachelor 3.5yr+ (since 2025-09)",),
         )
         formatted = ctx.format()
         assert "Lucas" in formatted

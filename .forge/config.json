@@ -1,0 +1,16 @@
+{
+  "depth": "standard",
+  "autonomy": "gated",
+  "max_iterations": 50,
+  "token_budget": 200000,
+  "repos": [
+    {
+      "name": "graphbot",
+      "path": "C:\\dev\\graphbot"
+    }
+  ],
+  "circuit_breaker": {
+    "max_consecutive_failures": 3,
+    "pause_on_trip": true
+  }
+}

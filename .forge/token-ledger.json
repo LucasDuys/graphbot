@@ -1,0 +1,12 @@
+{
+  "total": 0,
+  "iterations": 0,
+  "per_spec": {
+    "phase1-foundation": {
+      "estimated": 58000,
+      "actual": 0
+    }
+  },
+  "estimated_total": 58000,
+  "last_transcript_tokens": 0
+}
