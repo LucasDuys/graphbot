@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from datetime import datetime
 
 import Levenshtein
 
 from core_gb.types import ExecutionResult, Pattern, TaskNode
+from graph.store import GraphStore
 
 
 class PatternMatcher:
@@ -190,3 +192,53 @@ class PatternExtractor:
                 "consumes": list(node.consumes),
             })
         return json.dumps(template_nodes)
+
+
+class PatternStore:
+    """Stores and retrieves patterns from the knowledge graph."""
+
+    def __init__(self, store: GraphStore) -> None:
+        self._store = store
+
+    def save(self, pattern: Pattern) -> str:
+        """Save a pattern to the graph. Returns the pattern ID."""
+        props: dict[str, object] = {
+            "id": pattern.id,
+            "trigger_template": pattern.trigger,
+            "description": pattern.description,
+            "variable_slots": json.dumps(list(pattern.variable_slots)),
+            "success_count": pattern.success_count,
+            "avg_tokens": pattern.avg_tokens,
+            "avg_latency_ms": pattern.avg_latency_ms,
+            "created_at": datetime.now(),
+        }
+        return self._store.create_node("PatternNode", props)
+
+    def load_all(self) -> list[Pattern]:
+        """Retrieve all patterns from the graph."""
+        rows = self._store.query("MATCH (p:PatternNode) RETURN p.*")
+        patterns: list[Pattern] = []
+        for row in rows:
+            pid = row.get("p.id", "")
+            patterns.append(Pattern(
+                id=str(pid),
+                trigger=str(row.get("p.trigger_template", "")),
+                description=str(row.get("p.description", "")),
+                variable_slots=tuple(json.loads(row.get("p.variable_slots", "[]"))),
+                tree_template="",
+                success_count=int(row.get("p.success_count", 0)),
+                avg_tokens=float(row.get("p.avg_tokens", 0.0)),
+                avg_latency_ms=float(row.get("p.avg_latency_ms", 0.0)),
+            ))
+        return patterns
+
+    def increment_usage(self, pattern_id: str) -> None:
+        """Increment success count and update last_used timestamp."""
+        node = self._store.get_node("PatternNode", pattern_id)
+        if node is None:
+            return
+        current_count = int(node.get("success_count", 0))
+        self._store.update_node("PatternNode", pattern_id, {
+            "success_count": current_count + 1,
+            "last_used": datetime.now(),
+        })
