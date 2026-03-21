@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
 from graphlib import TopologicalSorter
 
+from core_gb.aggregator import Aggregator
 from core_gb.types import ExecutionResult, TaskNode
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,8 @@ class DAGExecutor:
     ) -> None:
         self._executor = executor
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._aggregator = Aggregator()
+        self.aggregation_template: dict | None = None
 
     async def execute(self, nodes: list[TaskNode]) -> ExecutionResult:
         """Execute a DAG of TaskNodes with parallel streaming dispatch.
@@ -105,7 +109,7 @@ class DAGExecutor:
                         if node.provides:
                             node.output_data[node.provides[0]] = output_text
 
-        return self._aggregate_results(root_id, leaves, results, start)
+        return self._aggregate_results(root_id, leaves, results, node_by_id, start)
 
     async def _execute_node(
         self,
@@ -166,6 +170,7 @@ class DAGExecutor:
         root_id: str,
         leaves: list[TaskNode],
         results: dict[str, ExecutionResult],
+        node_by_id: dict[str, TaskNode],
         start: float,
     ) -> ExecutionResult:
         """Combine results from all leaf executions into a single ExecutionResult."""
@@ -182,7 +187,6 @@ class DAGExecutor:
                 errors=("No leaf nodes executed",),
             )
 
-        outputs: list[str] = []
         total_tokens = 0
         total_cost = 0.0
         all_nodes: list[str] = []
@@ -194,8 +198,6 @@ class DAGExecutor:
             r = results.get(leaf.id)
             if r is None:
                 continue
-            if r.output:
-                outputs.append(r.output)
             total_tokens += r.total_tokens
             total_cost += r.total_cost
             all_nodes.extend(r.nodes)
@@ -203,11 +205,40 @@ class DAGExecutor:
             if not r.success:
                 all_success = False
 
+        # Build leaf_outputs dict for the deterministic aggregator
+        leaf_outputs: dict[str, str] = {}
+        for leaf in leaves:
+            r = results.get(leaf.id)
+            if r is None or not r.output:
+                continue
+            node = node_by_id[leaf.id]
+            if node.provides:
+                try:
+                    parsed = json.loads(r.output)
+                    if isinstance(parsed, dict):
+                        for key in node.provides:
+                            if key in parsed:
+                                leaf_outputs[key] = str(parsed[key])
+                            else:
+                                leaf_outputs[key] = r.output
+                    else:
+                        for key in node.provides:
+                            leaf_outputs[key] = r.output
+                except json.JSONDecodeError:
+                    for key in node.provides:
+                        leaf_outputs[key] = r.output
+            else:
+                leaf_outputs[f"output_{leaf.id}"] = r.output
+
+        aggregated = self._aggregator.aggregate(
+            self.aggregation_template, leaf_outputs
+        )
+
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         return ExecutionResult(
             root_id=root_id,
-            output="\n".join(outputs),
+            output=aggregated,
             success=all_success,
             total_nodes=len(results),
             total_tokens=total_tokens,

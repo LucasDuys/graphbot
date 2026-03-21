@@ -116,6 +116,7 @@ class Orchestrator:
             self._graph_updater.update(message, nodes, result)
             return result
 
+        self._dag_executor.aggregation_template = self._decomposer.last_template
         result = await self._dag_executor.execute(nodes)
         self._graph_updater.update(message, nodes, result)
         return result
