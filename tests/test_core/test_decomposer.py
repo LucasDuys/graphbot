@@ -351,6 +351,82 @@ class TestDecomposeJsonModePassedThrough:
         assert router._kwargs_log[0].get("response_format") == {"type": "json_object"}
 
 
+def _weather_tree_with_template_json() -> dict:
+    """Valid weather tree with output_template."""
+    tree = _weather_tree_json()
+    tree["output_template"] = {
+        "aggregation_type": "template_fill",
+        "template": "## Weather Comparison\n\n### Amsterdam\n{weather_ams}\n\n### London\n{weather_lon}\n\n### Berlin\n{weather_ber}",
+        "slot_definitions": {
+            "weather_ams": "Current weather in Amsterdam",
+            "weather_lon": "Current weather in London",
+            "weather_ber": "Current weather in Berlin",
+        },
+    }
+    return tree
+
+
+def _weather_tree_with_template_str() -> str:
+    """Valid weather tree with output_template as JSON string."""
+    return json.dumps(_weather_tree_with_template_json())
+
+
+class TestLastTemplateSet:
+    """Test that Decomposer.last_template is set when valid template in response."""
+
+    @pytest.mark.asyncio
+    async def test_last_template_set_on_valid_response(self) -> None:
+        router = MockRouter([_weather_tree_with_template_str()])
+        decomposer = Decomposer(router)
+
+        nodes = await decomposer.decompose("Weather in Amsterdam, London, Berlin")
+
+        assert len(nodes) == 5
+        assert decomposer.last_template is not None
+        assert decomposer.last_template["aggregation_type"] == "template_fill"
+        assert "weather_ams" in decomposer.last_template["template"]
+        assert "weather_ams" in decomposer.last_template["slot_definitions"]
+
+    @pytest.mark.asyncio
+    async def test_last_template_none_when_no_template(self) -> None:
+        router = MockRouter([_weather_tree_str()])
+        decomposer = Decomposer(router)
+
+        nodes = await decomposer.decompose("Weather in Amsterdam, London, Berlin")
+
+        assert len(nodes) == 5
+        assert decomposer.last_template is None
+
+    @pytest.mark.asyncio
+    async def test_last_template_reset_between_calls(self) -> None:
+        router = MockRouter([
+            _weather_tree_with_template_str(),
+            _weather_tree_str(),
+        ])
+        decomposer = Decomposer(router)
+
+        await decomposer.decompose("First call")
+        assert decomposer.last_template is not None
+
+        await decomposer.decompose("Second call")
+        assert decomposer.last_template is None
+
+    @pytest.mark.asyncio
+    async def test_last_template_none_on_fallback(self) -> None:
+        router = MockRouter(["garbage!!!", "more garbage!!!"])
+        decomposer = Decomposer(router)
+
+        nodes = await decomposer.decompose("Do something")
+
+        assert len(nodes) == 1
+        assert decomposer.last_template is None
+
+    def test_last_template_initial_value(self) -> None:
+        router = MockRouter([])
+        decomposer = Decomposer(router)
+        assert decomposer.last_template is None
+
+
 class TestFixMissingFields:
     """Test _fix_missing_fields fills in sensible defaults."""
 

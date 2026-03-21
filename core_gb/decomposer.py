@@ -73,7 +73,29 @@ DECOMPOSITION_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": _NODE_SCHEMA,
             "minItems": 1,
-        }
+        },
+        "output_template": {
+            "type": "object",
+            "required": ["aggregation_type", "template"],
+            "properties": {
+                "aggregation_type": {
+                    "type": "string",
+                    "enum": [
+                        "concatenate",
+                        "merge_json",
+                        "confidence_ranked",
+                        "template_fill",
+                    ],
+                },
+                "template": {
+                    "type": "string",
+                },
+                "slot_definitions": {
+                    "type": "object",
+                },
+            },
+            "additionalProperties": False,
+        },
     },
     "additionalProperties": False,
 }
@@ -163,6 +185,10 @@ Rules:
 6. Task types: RETRIEVE (fetch data), WRITE (produce text), THINK (reason/analyze), CODE (write/fix code)
 7. Domains: file, web, code, comms, system, synthesis
 8. Maximum 3 levels deep, maximum 5 children per node
+9. Include an "output_template" with:
+   - "aggregation_type": how to combine results ("concatenate" for lists, "template_fill" for structured, "merge_json" for data)
+   - "template": the final output format with {{slot_id}} placeholders matching leaf provides keys
+   - "slot_definitions": description of what each slot should contain
 </rules>
 
 <output_schema>
@@ -170,7 +196,12 @@ Rules:
   {{"id": "string", "description": "string", "domain": "enum", "task_type": "enum",
     "complexity": 1-5, "depends_on": ["id"], "provides": ["key"], "consumes": ["key"],
     "is_atomic": bool, "children": ["id"]}}
-]}}
+],
+"output_template": {{
+  "aggregation_type": "concatenate|merge_json|confidence_ranked|template_fill",
+  "template": "string with {{slot_id}} placeholders",
+  "slot_definitions": {{"slot_id": "description"}}
+}}}}
 </output_schema>
 
 <examples>
@@ -182,7 +213,8 @@ Task: "Weather in Amsterdam, London, Berlin"
 {{"id":"w2","description":"Get London weather","domain":"web","task_type":"RETRIEVE","complexity":1,"depends_on":[],"provides":["weather_lon"],"consumes":[],"is_atomic":true,"children":[]}},
 {{"id":"w3","description":"Get Berlin weather","domain":"web","task_type":"RETRIEVE","complexity":1,"depends_on":[],"provides":["weather_ber"],"consumes":[],"is_atomic":true,"children":[]}},
 {{"id":"agg","description":"Summarize weather","domain":"synthesis","task_type":"WRITE","complexity":1,"depends_on":["w1","w2","w3"],"provides":["summary"],"consumes":["weather_ams","weather_lon","weather_ber"],"is_atomic":true,"children":[]}}
-]}}
+],
+"output_template":{{"aggregation_type":"template_fill","template":"## Weather Comparison\\n\\n### Amsterdam\\n{{weather_ams}}\\n\\n### London\\n{{weather_lon}}\\n\\n### Berlin\\n{{weather_ber}}","slot_definitions":{{"weather_ams":"Current weather in Amsterdam","weather_lon":"Current weather in London","weather_ber":"Current weather in Berlin"}}}}}}
 
 GOOD Example 2 (sequential):
 Task: "Read README.md, find TODOs, list with line numbers"
@@ -191,7 +223,8 @@ Task: "Read README.md, find TODOs, list with line numbers"
 {{"id":"read","description":"Read README.md","domain":"file","task_type":"RETRIEVE","complexity":1,"depends_on":[],"provides":["file_content"],"consumes":[],"is_atomic":true,"children":[]}},
 {{"id":"find","description":"Find TODO lines","domain":"code","task_type":"CODE","complexity":1,"depends_on":["read"],"provides":["todo_lines"],"consumes":["file_content"],"is_atomic":true,"children":[]}},
 {{"id":"fmt","description":"Format with line numbers","domain":"synthesis","task_type":"WRITE","complexity":1,"depends_on":["find"],"provides":["formatted"],"consumes":["todo_lines"],"is_atomic":true,"children":[]}}
-]}}
+],
+"output_template":{{"aggregation_type":"concatenate","template":"## TODOs in README.md\\n\\n{{formatted}}","slot_definitions":{{"formatted":"List of TODO items with line numbers"}}}}}}
 
 BAD Example:
 Task: "Compare X and Y"
@@ -386,6 +419,7 @@ class Decomposer:
     def __init__(self, router: ModelRouter) -> None:
         self._router = router
         self._prompt_builder = DecompositionPrompt()
+        self.last_template: dict[str, Any] | None = None
 
     async def decompose(
         self, task: str, context: GraphContext | None = None, max_depth: int = 3
@@ -402,6 +436,7 @@ class Decomposer:
         7. On second failure: fallback to single atomic node
         8. Convert to list[TaskNode]
         """
+        self.last_template = None
         messages = self._prompt_builder.build(task, context)
 
         # Create a dummy TaskNode for routing (complexity 3 for decomposition)
@@ -415,8 +450,10 @@ class Decomposer:
                 response_format={"type": "json_object"},
             )
             first_content = completion.content
-            nodes = self._parse_and_validate(first_content, max_depth)
-            if nodes is not None:
+            result = self._parse_and_validate(first_content, max_depth)
+            if result is not None:
+                nodes, template = result
+                self.last_template = template
                 return self._to_task_nodes(nodes)
         except Exception as exc:
             logger.warning("Decomposition first attempt failed: %s", exc)
@@ -430,9 +467,12 @@ class Decomposer:
                     if nodes_data:
                         fixed_nodes = self._fix_missing_fields(nodes_data)
                         repaired_data = {"nodes": fixed_nodes}
+                        if repaired.get("output_template"):
+                            repaired_data["output_template"] = repaired["output_template"]
                         errors = validate_decomposition(repaired_data, max_depth=max_depth)
                         tree_errors = validate_tree(fixed_nodes)
                         if not errors and not tree_errors:
+                            self.last_template = repaired.get("output_template")
                             return self._to_task_nodes(fixed_nodes)
                 logger.warning("json_repair on first response failed validation")
             except Exception as exc:
@@ -444,8 +484,10 @@ class Decomposer:
                 route_node, messages,
                 response_format={"type": "json_object"},
             )
-            nodes = self._parse_and_validate(completion2.content, max_depth)
-            if nodes is not None:
+            result = self._parse_and_validate(completion2.content, max_depth)
+            if result is not None:
+                nodes, template = result
+                self.last_template = template
                 return self._to_task_nodes(nodes)
         except Exception as exc:
             logger.warning("Decomposition second attempt failed: %s", exc)
@@ -454,8 +496,10 @@ class Decomposer:
         logger.info("Falling back to single atomic node for: %s", task[:80])
         return self._fallback_single_node(task)
 
-    def _parse_and_validate(self, content: str, max_depth: int) -> list[dict] | None:
-        """Parse JSON and validate. Returns nodes list or None on failure."""
+    def _parse_and_validate(
+        self, content: str, max_depth: int
+    ) -> tuple[list[dict], dict[str, Any] | None] | None:
+        """Parse JSON and validate. Returns (nodes, output_template) or None on failure."""
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
@@ -469,7 +513,7 @@ class Decomposer:
         if tree_errors:
             return None
 
-        return data["nodes"]
+        return data["nodes"], data.get("output_template")
 
     def _fix_missing_fields(self, nodes: list[dict]) -> list[dict]:
         """Fix up nodes with missing fields by adding sensible defaults."""

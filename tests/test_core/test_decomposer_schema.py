@@ -484,3 +484,94 @@ class TestConfigurableMaxDepth:
         tree = _mixed_research_tree()  # depth 3
         errors = validate_decomposition(tree, max_depth=2)
         assert any("depth" in e.lower() for e in errors)
+
+
+class TestOutputTemplateSchema:
+    """output_template is optional and validates correctly when present."""
+
+    def test_valid_tree_without_output_template(self) -> None:
+        tree = _parallel_weather_tree()
+        errors = validate_decomposition(tree)
+        assert errors == [], f"Unexpected errors: {errors}"
+
+    def test_valid_tree_with_output_template(self) -> None:
+        tree = _parallel_weather_tree()
+        tree["output_template"] = {
+            "aggregation_type": "template_fill",
+            "template": "## Weather\n\n{weather_amsterdam}\n{weather_berlin}\n{weather_paris}",
+            "slot_definitions": {
+                "weather_amsterdam": "Current weather in Amsterdam",
+                "weather_berlin": "Current weather in Berlin",
+                "weather_paris": "Current weather in Paris",
+            },
+        }
+        errors = validate_decomposition(tree)
+        assert errors == [], f"Unexpected errors: {errors}"
+
+    def test_output_template_with_concatenate_type(self) -> None:
+        tree = _minimal_valid_tree()
+        tree["output_template"] = {
+            "aggregation_type": "concatenate",
+            "template": "{result}",
+        }
+        errors = validate_decomposition(tree)
+        assert errors == [], f"Unexpected errors: {errors}"
+
+    def test_output_template_with_merge_json_type(self) -> None:
+        tree = _minimal_valid_tree()
+        tree["output_template"] = {
+            "aggregation_type": "merge_json",
+            "template": "{}",
+        }
+        errors = validate_decomposition(tree)
+        assert errors == [], f"Unexpected errors: {errors}"
+
+    def test_output_template_with_confidence_ranked_type(self) -> None:
+        tree = _minimal_valid_tree()
+        tree["output_template"] = {
+            "aggregation_type": "confidence_ranked",
+            "template": "{result}",
+        }
+        errors = validate_decomposition(tree)
+        assert errors == [], f"Unexpected errors: {errors}"
+
+    def test_output_template_invalid_aggregation_type(self) -> None:
+        tree = _minimal_valid_tree()
+        tree["output_template"] = {
+            "aggregation_type": "invalid_type",
+            "template": "{result}",
+        }
+        errors = validate_decomposition(tree)
+        assert len(errors) > 0
+        assert any("aggregation_type" in e.lower() or "enum" in e.lower() for e in errors), (
+            f"Expected error about invalid aggregation_type, got: {errors}"
+        )
+
+    def test_output_template_missing_required_template(self) -> None:
+        tree = _minimal_valid_tree()
+        tree["output_template"] = {
+            "aggregation_type": "concatenate",
+        }
+        errors = validate_decomposition(tree)
+        assert len(errors) > 0
+        assert any("template" in e.lower() or "required" in e.lower() for e in errors), (
+            f"Expected error about missing template, got: {errors}"
+        )
+
+    def test_output_template_missing_required_aggregation_type(self) -> None:
+        tree = _minimal_valid_tree()
+        tree["output_template"] = {
+            "template": "{result}",
+        }
+        errors = validate_decomposition(tree)
+        assert len(errors) > 0
+
+    def test_output_template_rejects_extra_properties(self) -> None:
+        tree = _minimal_valid_tree()
+        tree["output_template"] = {
+            "aggregation_type": "concatenate",
+            "template": "{result}",
+            "unknown_field": "should fail",
+        }
+        errors = validate_decomposition(tree)
+        assert len(errors) > 0

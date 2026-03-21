@@ -214,3 +214,58 @@ class TestExampleTreesValidate:
         # BAD section must exist with explanation
         assert "BAD" in examples_text
         assert "WRONG" in examples_text
+
+
+class TestPromptMentionsOutputTemplate:
+    """Verify the prompt instructs the model to produce output_template."""
+
+    def test_rules_mention_output_template(self) -> None:
+        prompt = DecompositionPrompt()
+        messages = prompt.build("Do something")
+        system = messages[0]["content"]
+        assert "output_template" in system
+
+    def test_rules_mention_aggregation_type(self) -> None:
+        prompt = DecompositionPrompt()
+        messages = prompt.build("Do something")
+        system = messages[0]["content"]
+        assert "aggregation_type" in system
+
+    def test_rules_mention_template_fill(self) -> None:
+        prompt = DecompositionPrompt()
+        messages = prompt.build("Do something")
+        system = messages[0]["content"]
+        assert "template_fill" in system
+
+    def test_rules_mention_concatenate(self) -> None:
+        prompt = DecompositionPrompt()
+        messages = prompt.build("Do something")
+        system = messages[0]["content"]
+        assert "concatenate" in system
+
+    def test_rules_mention_slot_definitions(self) -> None:
+        prompt = DecompositionPrompt()
+        messages = prompt.build("Do something")
+        system = messages[0]["content"]
+        assert "slot_definitions" in system
+
+    def test_output_schema_mentions_output_template(self) -> None:
+        prompt = DecompositionPrompt()
+        messages = prompt.build("Do something")
+        system = messages[0]["content"]
+        schema_match = re.search(
+            r"<output_schema>(.*?)</output_schema>", system, re.DOTALL
+        )
+        assert schema_match
+        assert "output_template" in schema_match.group(1)
+
+    def test_good_examples_contain_output_template(self) -> None:
+        prompt = DecompositionPrompt()
+        messages = prompt.build("Do something")
+        system = messages[0]["content"]
+        examples_match = re.search(
+            r"<examples>(.*?)</examples>", system, re.DOTALL
+        )
+        assert examples_match
+        good_section = examples_match.group(1).split("BAD")[0]
+        assert "output_template" in good_section
