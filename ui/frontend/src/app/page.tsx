@@ -1,4 +1,7 @@
 import { DagCanvas } from "@/components/dag/DagCanvas";
+import { TaskInput } from "@/components/TaskInput";
+import { StatusBar } from "@/components/StatusBar";
+import { ResultPanel } from "@/components/ResultPanel";
 
 export default function Home() {
   return (
@@ -22,11 +25,12 @@ export default function Home() {
           DAG Execution Monitor
         </span>
       </header>
-      <div style={{ flex: 1, display: "flex" }}>
-        <div style={{ flex: 1 }}>
-          <DagCanvas />
-        </div>
+      <StatusBar />
+      <div style={{ flex: 1 }}>
+        <DagCanvas />
       </div>
+      <ResultPanel />
+      <TaskInput />
     </main>
   );
 }

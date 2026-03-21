@@ -1,9 +1,9 @@
 ---
 phase: in_progress
 spec: phase4-patterns
-current_task: T047
+current_task: T053
 task_status: complete
-iteration: 26
+iteration: 27
 tokens_used: 100000
 tokens_budget: 200000
 depth: standard
@@ -44,12 +44,18 @@ handoff_requested: false
 - T036/T037: 3-way comparison script + graph stats script (5 tests)
 - T045: Wire deterministic Aggregator into DAGExecutor (5 tests, committed b6dd9b4)
 - T046/T047: E2E pipeline pattern verification -- 1+N call pattern (4 tests, committed 049839a)
+- T051: FastAPI SSE server for streaming pipeline events (6 tests, committed 89dfa8f)
+
+- T052/T053: SSE client + real-time DAG visualization (Jotai store, SSE streaming, TaskInput, StatusBar, ResultPanel, ELK layout)
 
 ## In-Flight Work
 None.
 
+## What's Done (UI)
+- T049/T050: Next.js frontend scaffold with design system + React Flow DAG canvas (complete, committed a2bd66a)
+
 ## What's Next
-Phase 7 complete. Continue with benchmarks and production readiness.
+Phase 7 complete. Continue with benchmarks, production readiness, and UI integration.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
