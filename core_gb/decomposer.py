@@ -363,3 +363,145 @@ def validate_tree(nodes: list[dict[str, Any]]) -> list[str]:
                 )
 
     return errors
+
+
+# ---------------------------------------------------------------------------
+# Decomposer class (T016)
+# ---------------------------------------------------------------------------
+
+import json
+import json_repair
+import uuid
+import logging
+
+from core_gb.types import Domain, TaskNode, TaskStatus
+from models.router import ModelRouter
+
+logger = logging.getLogger(__name__)
+
+
+class Decomposer:
+    """Recursive task decomposer using constrained JSON output from LLMs."""
+
+    def __init__(self, router: ModelRouter) -> None:
+        self._router = router
+        self._prompt_builder = DecompositionPrompt()
+
+    async def decompose(
+        self, task: str, context: GraphContext | None = None, max_depth: int = 3
+    ) -> list[TaskNode]:
+        """Decompose a task into a list of TaskNodes.
+
+        Flow:
+        1. Build prompt via DecompositionPrompt
+        2. Call ModelRouter with complexity 3 (decomposition needs capable model)
+        3. Parse JSON response
+        4. Validate against schema + tree structure
+        5. On invalid: retry once with json_repair
+        6. On second failure: fallback to single atomic node
+        7. Convert to list[TaskNode]
+        """
+        messages = self._prompt_builder.build(task, context)
+
+        # Create a dummy TaskNode for routing (complexity 3 for decomposition)
+        route_node = TaskNode(id="decompose", description=task, complexity=3)
+
+        # First attempt
+        try:
+            completion = await self._router.route(route_node, messages)
+            nodes = self._parse_and_validate(completion.content, max_depth)
+            if nodes is not None:
+                return self._to_task_nodes(nodes)
+        except Exception as exc:
+            logger.warning("Decomposition first attempt failed: %s", exc)
+
+        # Retry with json_repair
+        try:
+            completion = await self._router.route(route_node, messages)
+            repaired = json_repair.loads(completion.content)
+            if isinstance(repaired, dict):
+                errors = validate_decomposition(repaired, max_depth=max_depth)
+                tree_errors = validate_tree(repaired.get("nodes", []))
+                if not errors and not tree_errors:
+                    return self._to_task_nodes(repaired["nodes"])
+            logger.warning("Decomposition retry failed validation")
+        except Exception as exc:
+            logger.warning("Decomposition retry failed: %s", exc)
+
+        # Fallback: single atomic node
+        logger.info("Falling back to single atomic node for: %s", task[:80])
+        return self._fallback_single_node(task)
+
+    def _parse_and_validate(self, content: str, max_depth: int) -> list[dict] | None:
+        """Parse JSON and validate. Returns nodes list or None on failure."""
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+
+        errors = validate_decomposition(data, max_depth=max_depth)
+        if errors:
+            return None
+
+        tree_errors = validate_tree(data.get("nodes", []))
+        if tree_errors:
+            return None
+
+        return data["nodes"]
+
+    def _to_task_nodes(self, raw_nodes: list[dict]) -> list[TaskNode]:
+        """Convert raw decomposition dicts to TaskNode objects."""
+        result: list[TaskNode] = []
+        # Map original IDs to UUIDs
+        id_map: dict[str, str] = {n["id"]: str(uuid.uuid4()) for n in raw_nodes}
+
+        # Find child IDs to determine roots
+        child_ids: set[str] = set()
+        for n in raw_nodes:
+            child_ids.update(n.get("children", []))
+
+        for raw in raw_nodes:
+            original_id = raw["id"]
+            new_id = id_map[original_id]
+
+            # Map domain string to Domain enum
+            domain_str = raw.get("domain", "synthesis")
+            try:
+                domain = Domain(domain_str)
+            except ValueError:
+                domain = Domain.SYNTHESIS
+
+            # Find parent (the node whose children list contains this node)
+            parent_id: str | None = None
+            for other in raw_nodes:
+                if original_id in other.get("children", []):
+                    parent_id = id_map[other["id"]]
+                    break
+
+            node = TaskNode(
+                id=new_id,
+                description=raw["description"],
+                parent_id=parent_id,
+                children=[id_map[c] for c in raw.get("children", []) if c in id_map],
+                requires=[id_map[d] for d in raw.get("depends_on", []) if d in id_map],
+                provides=raw.get("provides", []),
+                consumes=raw.get("consumes", []),
+                is_atomic=raw.get("is_atomic", False),
+                domain=domain,
+                complexity=raw.get("complexity", 1),
+                status=TaskStatus.CREATED,
+            )
+            result.append(node)
+
+        return result
+
+    def _fallback_single_node(self, task: str) -> list[TaskNode]:
+        """Create a single atomic TaskNode as fallback."""
+        return [TaskNode(
+            id=str(uuid.uuid4()),
+            description=task,
+            is_atomic=True,
+            domain=Domain.SYNTHESIS,
+            complexity=1,
+            status=TaskStatus.READY,
+        )]
