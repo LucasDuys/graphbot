@@ -1,0 +1,139 @@
+{
+  "tasks": [
+    {
+      "id": "simple_01",
+      "description": "What is 247 * 38?",
+      "category": "simple",
+      "expected_behavior": "direct",
+      "expected_min_nodes": 1,
+      "difficulty": 1,
+      "expected_answer_contains": ["9386"]
+    },
+    {
+      "id": "simple_02",
+      "description": "What is the capital of France?",
+      "category": "simple",
+      "expected_behavior": "direct",
+      "expected_min_nodes": 1,
+      "difficulty": 1,
+      "expected_answer_contains": ["Paris"]
+    },
+    {
+      "id": "simple_03",
+      "description": "Define the term 'recursion' in computer science.",
+      "category": "simple",
+      "expected_behavior": "direct",
+      "expected_min_nodes": 1,
+      "difficulty": 1,
+      "expected_answer_contains": ["function", "itself"]
+    },
+    {
+      "id": "simple_04",
+      "description": "Convert 72 degrees Fahrenheit to Celsius.",
+      "category": "simple",
+      "expected_behavior": "direct",
+      "expected_min_nodes": 1,
+      "difficulty": 1,
+      "expected_answer_contains": ["22"]
+    },
+    {
+      "id": "simple_05",
+      "description": "What programming language is GraphBot written in?",
+      "category": "simple",
+      "expected_behavior": "direct",
+      "expected_min_nodes": 1,
+      "difficulty": 1,
+      "expected_answer_contains": ["Python"]
+    },
+    {
+      "id": "parallel_01",
+      "description": "Compare the weather in Amsterdam, London, and Berlin.",
+      "category": "parallel",
+      "expected_behavior": "parallel",
+      "expected_min_nodes": 3,
+      "difficulty": 2,
+      "expected_answer_contains": ["Amsterdam", "London", "Berlin"]
+    },
+    {
+      "id": "parallel_02",
+      "description": "List the top 3 features of Python, JavaScript, and Rust.",
+      "category": "parallel",
+      "expected_behavior": "parallel",
+      "expected_min_nodes": 3,
+      "difficulty": 2,
+      "expected_answer_contains": ["Python", "JavaScript", "Rust"]
+    },
+    {
+      "id": "parallel_03",
+      "description": "Summarize the pros and cons of PostgreSQL, MongoDB, and Redis.",
+      "category": "parallel",
+      "expected_behavior": "parallel",
+      "expected_min_nodes": 3,
+      "difficulty": 3,
+      "expected_answer_contains": ["PostgreSQL", "MongoDB", "Redis"]
+    },
+    {
+      "id": "parallel_04",
+      "description": "Explain the differences between TCP, UDP, and WebSockets.",
+      "category": "parallel",
+      "expected_behavior": "parallel",
+      "expected_min_nodes": 3,
+      "difficulty": 2,
+      "expected_answer_contains": ["TCP", "UDP", "WebSocket"]
+    },
+    {
+      "id": "parallel_05",
+      "description": "Compare React, Vue, and Svelte for building web applications.",
+      "category": "parallel",
+      "expected_behavior": "parallel",
+      "expected_min_nodes": 3,
+      "difficulty": 3,
+      "expected_answer_contains": ["React", "Vue", "Svelte"]
+    },
+    {
+      "id": "sequential_01",
+      "description": "First explain what a binary search tree is, then describe how to insert a node, then analyze the time complexity.",
+      "category": "sequential",
+      "expected_behavior": "sequential",
+      "expected_min_nodes": 3,
+      "difficulty": 2,
+      "expected_answer_contains": ["binary", "insert", "O(log"]
+    },
+    {
+      "id": "sequential_02",
+      "description": "Define machine learning, then explain supervised vs unsupervised learning, then give one example of each.",
+      "category": "sequential",
+      "expected_behavior": "sequential",
+      "expected_min_nodes": 3,
+      "difficulty": 2,
+      "expected_answer_contains": ["supervised", "unsupervised", "example"]
+    },
+    {
+      "id": "sequential_03",
+      "description": "Explain what an API is, then describe REST vs GraphQL, then recommend which to use for a mobile app.",
+      "category": "sequential",
+      "expected_behavior": "sequential",
+      "expected_min_nodes": 3,
+      "difficulty": 3,
+      "expected_answer_contains": ["API", "REST", "GraphQL"]
+    },
+    {
+      "id": "sequential_04",
+      "description": "Describe the HTTP request lifecycle: DNS resolution, then TCP handshake, then TLS negotiation, then the actual request.",
+      "category": "sequential",
+      "expected_behavior": "sequential",
+      "expected_min_nodes": 3,
+      "difficulty": 3,
+      "expected_answer_contains": ["DNS", "TCP", "TLS"]
+    },
+    {
+      "id": "sequential_05",
+      "description": "First explain what Docker is, then describe how Docker Compose works, then explain when to use Kubernetes instead.",
+      "category": "sequential",
+      "expected_behavior": "sequential",
+      "expected_min_nodes": 3,
+      "difficulty": 3,
+      "expected_answer_contains": ["Docker", "Compose", "Kubernetes"]
+    }
+  ]
+}
