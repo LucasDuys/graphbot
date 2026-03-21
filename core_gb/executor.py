@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 
@@ -24,7 +25,9 @@ class SimpleExecutor:
         self._router = router
         self._resolver = EntityResolver(store)
 
-    async def execute(self, task: str, complexity: int = 1) -> ExecutionResult:
+    async def execute(
+        self, task: str, complexity: int = 1, provides_keys: list[str] | None = None,
+    ) -> ExecutionResult:
         """Execute a single task with graph context.
 
         Flow:
@@ -54,17 +57,25 @@ class SimpleExecutor:
         context_str = context.format()
 
         # Step 4: Build messages (ADR-009: context at beginning)
+        json_instruction = ""
+        if provides_keys:
+            keys_desc = ", ".join(f'"{k}"' for k in provides_keys)
+            json_instruction = (
+                f"\n\nIMPORTANT: Return your answer as a JSON object with these keys: "
+                f"{keys_desc}. Each value should be a string with your answer for that part."
+            )
+
         if context_str:
             messages: list[dict[str, str]] = [
                 {
                     "role": "system",
-                    "content": f"<context>\n{context_str}\n</context>\n\nYou are a helpful assistant.",
+                    "content": f"<context>\n{context_str}\n</context>\n\nYou are a helpful assistant.{json_instruction}",
                 },
                 {"role": "user", "content": task},
             ]
         else:
             messages = [
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": f"You are a helpful assistant.{json_instruction}"},
                 {"role": "user", "content": task},
             ]
 
@@ -79,12 +90,27 @@ class SimpleExecutor:
         )
 
         try:
-            completion: CompletionResult = await self._router.route(task_node, messages)
+            route_kwargs: dict[str, object] = {}
+            if provides_keys:
+                route_kwargs["response_format"] = {"type": "json_object"}
+
+            completion: CompletionResult = await self._router.route(
+                task_node, messages, **route_kwargs
+            )
             elapsed_ms = (time.perf_counter() - start) * 1000
+
+            # Parse structured output when provides_keys is set
+            output = completion.content
+            if provides_keys:
+                try:
+                    parsed = json.loads(completion.content)
+                    output = json.dumps(parsed)
+                except json.JSONDecodeError:
+                    output = json.dumps({provides_keys[0]: completion.content})
 
             return ExecutionResult(
                 root_id=root_id,
-                output=completion.content,
+                output=output,
                 success=True,
                 total_nodes=1,
                 total_tokens=completion.tokens_in + completion.tokens_out,

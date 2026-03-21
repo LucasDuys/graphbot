@@ -31,7 +31,9 @@ class MockSimpleExecutor:
         self._fail_on = fail_on or set()
         self._lock = asyncio.Lock()
 
-    async def execute(self, task: str, complexity: int = 1) -> ExecutionResult:
+    async def execute(
+        self, task: str, complexity: int = 1, provides_keys: list[str] | None = None,
+    ) -> ExecutionResult:
         async with self._lock:
             self.call_order.append(task)
         if self.delay > 0:

@@ -131,8 +131,10 @@ class DAGExecutor:
                 context_str = "\n".join(context_parts)
                 task_text = f"<forwarded_data>\n{context_str}\n</forwarded_data>\n\n{task_text}"
 
+            _provides = list(node.provides) if node.provides else None
+
             try:
-                result = await self._executor.execute(task_text, node.complexity)
+                result = await self._executor.execute(task_text, node.complexity, provides_keys=_provides)
             except Exception as exc:
                 logger.error("Node %s failed with exception: %s", node.id, exc)
                 result = ExecutionResult(
