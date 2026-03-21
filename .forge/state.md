@@ -1,7 +1,7 @@
 ---
 phase: in_progress
 spec: phase4-patterns
-current_task: T036_T037
+current_task: T047
 task_status: complete
 iteration: 26
 tokens_used: 100000
@@ -42,12 +42,14 @@ handoff_requested: false
 - T033: Seed graph, A/B comparison, canonical tests, quickstart docs (5 tests, committed 20cb649)
 - T035: Fix decomposition reliability -- JSON mode, repair-first retry, field defaults (4 new tests, committed 593f3ec)
 - T036/T037: 3-way comparison script + graph stats script (5 tests)
+- T045: Wire deterministic Aggregator into DAGExecutor (5 tests, committed b6dd9b4)
+- T046/T047: E2E pipeline pattern verification -- 1+N call pattern (4 tests, committed 049839a)
 
 ## In-Flight Work
 None.
 
 ## What's Next
-Continue Phase 6: benchmarks and production readiness tasks.
+Phase 7 complete. Continue with benchmarks and production readiness.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
