@@ -74,8 +74,16 @@ All 5 phases of the core engine are done. Next: optimization, real-world usage, 
 - [x] LangSmith EU endpoint configured, claude-agent-sdk installed
 - **Total: 287 tests, all passing**
 
+## Phase 7 Completed (2026-03-21)
+- [x] T046/T047: End-to-end pipeline pattern verification
+  - test_simple_task_1_call: simple task = exactly 1 LLM call, no decomposition
+  - test_complex_task_1_plus_n_calls: complex task = 1 decompose + 3 leaves = 4 LLM calls, 0 aggregation
+  - test_aggregated_output_has_template: template_fill produces correct slot-filled output
+  - test_pattern_cache_skips_decomposition: pre-seeded PatternNode = 0 decompose + 3 leaves = 3 LLM calls
+- **Total: 868 tests (864 pre-existing + 4 new), all passing**
+
 ## In Progress
-_Nothing -- all 5 phases complete._
+_Nothing._
 
 ## Blocked
 _Nothing blocked._
@@ -101,7 +109,7 @@ _Nothing blocked._
 | Metric | Target | Current | Notes |
 |--------|--------|---------|-------|
 | Lines of code (new) | <8,000 | ~3,500 | core_gb + graph + models + scripts + tests |
-| Test count | -- | 287 | All passing (Phase 5 complete) |
+| Test count | -- | 868 | All passing (Phase 7 complete) |
 | 2-hop query (100 nodes) | <1ms | ~13ms | Needs optimization (full table scan approach) |
 | Context assembly (100 nodes) | <10ms | ~23ms | Needs indexed queries |
 | Entity resolution (100 nodes) | <10ms | ~3ms | Meets target |
