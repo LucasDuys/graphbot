@@ -33,8 +33,10 @@ def setup_langsmith() -> bool:
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
     os.environ.setdefault("LANGSMITH_TRACING", "true")
     os.environ.setdefault("LANGSMITH_PROJECT", "graphbot")
-    # EU endpoint for LangSmith
+    # EU endpoint for LangSmith -- litellm uses LANGCHAIN_ENDPOINT
     os.environ.setdefault("LANGSMITH_ENDPOINT", "https://eu.api.smith.langchain.com")
+    os.environ.setdefault("LANGCHAIN_ENDPOINT", "https://eu.api.smith.langchain.com")
+    os.environ.setdefault("LANGSMITH_BASE_URL", "https://eu.api.smith.langchain.com")
 
     import litellm
 
