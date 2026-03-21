@@ -1,8 +1,8 @@
 # GraphBot Progress
 
 ## Current Phase
-**Phase 1: Foundation -- COMPLETE**
-Next: Begin Phase 2 (Recursive Decomposition + Constrained JSON)
+**Phase 3: Parallel DAG Execution -- COMPLETE**
+Next: Begin Phase 4 (Pattern Learning + Caching)
 
 ## Completed
 - [x] Full architecture design (2026-03-20)
@@ -40,8 +40,26 @@ Next: Begin Phase 2 (Recursive Decomposition + Constrained JSON)
 - [x] T011: SimpleExecutor -- E2E path (graph context -> LLM call -> result), 5 tests
 - **Total: 111 new tests, all passing**
 
+## Phase 2 Completed (2026-03-21)
+- [x] T012: IntakeParser -- rule-based zero-cost intent classification, complexity scoring
+- [x] T013: Decomposition JSON schema -- JSON schema + validator for task trees
+- [x] T014: DecompositionPrompt -- prompt template for LLM-based decomposition
+- [x] T015: Tree validation -- structural validation of decomposition output
+- [x] T016: Decomposer -- LLM-based task decomposition with retry/fallback
+- [x] T017: Orchestrator -- intake -> decompose -> execute pipeline, sequential DAG execution
+- **Total: 213+ tests, all passing**
+
+## Phase 3 Completed (2026-03-21)
+- [x] T020: Rate limiting -- per-provider rate limiting with aiolimiter
+- [x] T021: Circuit breaking -- per-provider circuit breaking with aiobreaker
+- [x] T022: Tracing -- @traced decorator for pipeline stage timing
+- [x] T023: DAGExecutor -- parallel streaming topological dispatch with semaphore-bounded concurrency
+- [x] T024: ModelRouter wiring -- rate_limiter and circuit_breaker params in ModelRouter
+- [x] T025/T026: Orchestrator integration -- replaced sequential _execute_dag with parallel DAGExecutor
+- **Total: 757 tests, all passing**
+
 ## In Progress
-_Nothing -- ready for Phase 2._
+_Nothing -- ready for Phase 4._
 
 ## Blocked
 _Nothing blocked._
@@ -67,7 +85,7 @@ _Nothing blocked._
 | Metric | Target | Current | Notes |
 |--------|--------|---------|-------|
 | Lines of code (new) | <8,000 | ~1,200 | types + store + CRUD + context + resolver + provider + router + executor |
-| Test count | -- | 111 | All passing |
+| Test count | -- | 757 | All passing (Phase 3 complete) |
 | 2-hop query (100 nodes) | <1ms | ~13ms | Needs optimization (full table scan approach) |
 | Context assembly (100 nodes) | <10ms | ~23ms | Needs indexed queries |
 | Entity resolution (100 nodes) | <10ms | ~3ms | Meets target |
@@ -103,3 +121,17 @@ _Nothing blocked._
 - Benchmark results: entity resolution fast (3ms), 2-hop and context assembly need optimization (13-23ms at 100 nodes)
 - Optimization path: indexed lookups, cached entity lists, batched queries
 - Next session: Phase 2 -- recursive decomposition with constrained JSON output
+
+### 2026-03-21 -- Session 2: Phase 2 + Phase 3 (complete)
+- Phase 2: Recursive decomposition pipeline (T012-T017)
+  - IntakeParser: rule-based complexity scoring, zero LLM calls
+  - Decomposer: LLM-based task tree generation with JSON schema validation
+  - Orchestrator: full intake -> decompose -> execute pipeline
+- Phase 3: Parallel DAG execution (T020-T026)
+  - Rate limiting (aiolimiter) and circuit breaking (aiobreaker) per provider
+  - @traced decorator for pipeline stage observability
+  - DAGExecutor: streaming topological dispatch with asyncio.wait + semaphore
+  - Wired DAGExecutor into Orchestrator, replacing sequential _execute_dag
+  - Removed ~160 lines of sequential execution code from Orchestrator
+- 757 tests passing, 0 failures
+- Next session: Phase 4 -- pattern learning and caching
