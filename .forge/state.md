@@ -34,7 +34,7 @@ handoff_requested: false
 - T023: Parallel DAG executor with streaming topological dispatch (9 tests, committed 808a02f)
 - T024: Wire rate limiter + circuit breaker into ModelRouter (5 tests, committed 7c4beea)
 
-- T025/T026: Orchestrator DAGExecutor integration (replaced sequential _execute_dag, committed TBD)
+- T025/T026: Orchestrator DAGExecutor integration (replaced sequential _execute_dag, committed 71c3620)
 
 ## In-Flight Work
 None.
