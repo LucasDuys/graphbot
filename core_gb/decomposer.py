@@ -394,12 +394,13 @@ class Decomposer:
 
         Flow:
         1. Build prompt via DecompositionPrompt
-        2. Call ModelRouter with complexity 3 (decomposition needs capable model)
+        2. Call ModelRouter with complexity 3 and JSON mode
         3. Parse JSON response
         4. Validate against schema + tree structure
-        5. On invalid: retry once with json_repair
-        6. On second failure: fallback to single atomic node
-        7. Convert to list[TaskNode]
+        5. On invalid: try json_repair on SAME response first
+        6. If repair fails: second LLM call
+        7. On second failure: fallback to single atomic node
+        8. Convert to list[TaskNode]
         """
         messages = self._prompt_builder.build(task, context)
 
@@ -407,26 +408,47 @@ class Decomposer:
         route_node = TaskNode(id="decompose", description=task, complexity=3)
 
         # First attempt
+        first_content: str | None = None
         try:
-            completion = await self._router.route(route_node, messages)
-            nodes = self._parse_and_validate(completion.content, max_depth)
+            completion = await self._router.route(
+                route_node, messages,
+                response_format={"type": "json_object"},
+            )
+            first_content = completion.content
+            nodes = self._parse_and_validate(first_content, max_depth)
             if nodes is not None:
                 return self._to_task_nodes(nodes)
         except Exception as exc:
             logger.warning("Decomposition first attempt failed: %s", exc)
 
-        # Retry with json_repair
+        # Try json_repair on the FIRST response before calling LLM again
+        if first_content is not None:
+            try:
+                repaired = json_repair.loads(first_content)
+                if isinstance(repaired, dict):
+                    nodes_data = repaired.get("nodes", [])
+                    if nodes_data:
+                        fixed_nodes = self._fix_missing_fields(nodes_data)
+                        repaired_data = {"nodes": fixed_nodes}
+                        errors = validate_decomposition(repaired_data, max_depth=max_depth)
+                        tree_errors = validate_tree(fixed_nodes)
+                        if not errors and not tree_errors:
+                            return self._to_task_nodes(fixed_nodes)
+                logger.warning("json_repair on first response failed validation")
+            except Exception as exc:
+                logger.warning("json_repair on first response failed: %s", exc)
+
+        # Second LLM attempt
         try:
-            completion = await self._router.route(route_node, messages)
-            repaired = json_repair.loads(completion.content)
-            if isinstance(repaired, dict):
-                errors = validate_decomposition(repaired, max_depth=max_depth)
-                tree_errors = validate_tree(repaired.get("nodes", []))
-                if not errors and not tree_errors:
-                    return self._to_task_nodes(repaired["nodes"])
-            logger.warning("Decomposition retry failed validation")
+            completion2 = await self._router.route(
+                route_node, messages,
+                response_format={"type": "json_object"},
+            )
+            nodes = self._parse_and_validate(completion2.content, max_depth)
+            if nodes is not None:
+                return self._to_task_nodes(nodes)
         except Exception as exc:
-            logger.warning("Decomposition retry failed: %s", exc)
+            logger.warning("Decomposition second attempt failed: %s", exc)
 
         # Fallback: single atomic node
         logger.info("Falling back to single atomic node for: %s", task[:80])
@@ -448,6 +470,25 @@ class Decomposer:
             return None
 
         return data["nodes"]
+
+    def _fix_missing_fields(self, nodes: list[dict]) -> list[dict]:
+        """Fix up nodes with missing fields by adding sensible defaults."""
+        fixed: list[dict] = []
+        for i, node in enumerate(nodes):
+            n = dict(node)
+            n.setdefault("id", f"node_{i}")
+            n.setdefault("description", "")
+            n.setdefault("domain", "synthesis")
+            n.setdefault("task_type", "THINK")
+            n.setdefault("complexity", 1)
+            n.setdefault("depends_on", [])
+            n.setdefault("provides", [])
+            n.setdefault("consumes", [])
+            n.setdefault("children", [])
+            if "is_atomic" not in n:
+                n["is_atomic"] = len(n["children"]) == 0
+            fixed.append(n)
+        return fixed
 
     def _to_task_nodes(self, raw_nodes: list[dict]) -> list[TaskNode]:
         """Convert raw decomposition dicts to TaskNode objects."""

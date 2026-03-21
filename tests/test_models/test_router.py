@@ -101,7 +101,25 @@ class TestRouting:
 
         assert isinstance(result, CompletionResult)
         provider._mock_complete.assert_awaited_once_with(
-            messages, DEFAULT_MODEL_MAP[3]
+            messages, DEFAULT_MODEL_MAP[3],
+        )
+
+    async def test_route_forwards_kwargs_to_provider(self) -> None:
+        provider = FakeProvider()
+        provider._mock_complete.return_value = _make_result()
+        router = ModelRouter(provider=provider)
+
+        task = _make_task(complexity=3)
+        messages = [{"role": "user", "content": "hi"}]
+
+        await router.route(
+            task, messages,
+            response_format={"type": "json_object"},
+        )
+
+        provider._mock_complete.assert_awaited_once_with(
+            messages, DEFAULT_MODEL_MAP[3],
+            response_format={"type": "json_object"},
         )
 
     async def test_route_uses_task_complexity(self) -> None:

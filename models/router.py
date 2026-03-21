@@ -49,7 +49,9 @@ class ModelRouter:
         clamped = max(_MIN_COMPLEXITY, min(_MAX_COMPLEXITY, complexity))
         return self._model_map[clamped]
 
-    async def route(self, task: TaskNode, messages: list[dict]) -> CompletionResult:
+    async def route(
+        self, task: TaskNode, messages: list[dict], **kwargs: object
+    ) -> CompletionResult:
         """Select a model based on task complexity and run completion."""
         model = self.get_model_for_complexity(task.complexity)
         provider = self._providers[0]
@@ -64,7 +66,7 @@ class ModelRouter:
 
         # Call provider and record outcome in circuit breaker.
         try:
-            result = await provider.complete(messages, model)
+            result = await provider.complete(messages, model, **kwargs)
         except Exception as exc:
             if self._circuit_breaker is not None:
                 breaker = self._circuit_breaker.get_breaker(provider.name)
