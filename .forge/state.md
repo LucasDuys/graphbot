@@ -50,6 +50,8 @@ handoff_requested: false
 - T062: Web scraping/search tools for DAG leaf execution (8 tests, committed d87a6b7)
 - T065: Tool registry + DAG executor wiring (15 tests, committed 4dbcff5)
 
+- T067-T069: Real-world tool task suite + runner + tests (10 tasks, committed 89364f6)
+
 ## In-Flight Work
 None.
 
@@ -57,7 +59,7 @@ None.
 - T049/T050: Next.js frontend scaffold with design system + React Flow DAG canvas (complete, committed a2bd66a)
 
 ## What's Next
-Phase 7 complete. Continue with benchmarks, production readiness, and UI integration.
+Run real tasks with API key to populate results. Continue with production readiness and UI integration.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
