@@ -6,6 +6,8 @@ import json
 import logging
 import uuid
 
+from pathlib import Path
+
 from core_gb.dag_executor import DAGExecutor
 from core_gb.decomposer import Decomposer
 from core_gb.executor import SimpleExecutor
@@ -16,6 +18,7 @@ from graph.resolver import EntityResolver
 from graph.store import GraphStore
 from graph.updater import GraphUpdater
 from models.router import ModelRouter
+from tools_gb.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +36,8 @@ class Orchestrator:
         self._router = router
         self._intake = IntakeParser()
         self._executor = SimpleExecutor(store, router)
-        self._dag_executor = DAGExecutor(self._executor)
+        self._tool_registry = ToolRegistry(workspace=str(Path.cwd()))
+        self._dag_executor = DAGExecutor(self._executor, tool_registry=self._tool_registry)
         self._decomposer = Decomposer(router)
         self._resolver = EntityResolver(store)
         self._pattern_store = PatternStore(store)

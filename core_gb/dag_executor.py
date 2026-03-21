@@ -26,10 +26,12 @@ class DAGExecutor:
         self,
         executor: object,
         max_concurrency: int = 10,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self._executor = executor
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._aggregator = Aggregator()
+        self._tool_registry = tool_registry
         self.aggregation_template: dict | None = None
 
     async def execute(self, nodes: list[TaskNode]) -> ExecutionResult:
@@ -134,7 +136,11 @@ class DAGExecutor:
             _provides = list(node.provides) if node.provides else None
 
             try:
-                result = await self._executor.execute(task_text, node.complexity, provides_keys=_provides)
+                # Use tool registry for domains with registered tools
+                if self._tool_registry and node.is_atomic and self._tool_registry.has_tool(node.domain):
+                    result = await self._tool_registry.execute(node)
+                else:
+                    result = await self._executor.execute(task_text, node.complexity, provides_keys=_provides)
             except Exception as exc:
                 logger.error("Node %s failed with exception: %s", node.id, exc)
                 result = ExecutionResult(
