@@ -23,7 +23,8 @@ load_env()
 
 from graph.store import GraphStore
 
-GRAPH_DIR = Path(__file__).parent.parent / "data" / "graph"
+DATA_DIR = Path(__file__).parent.parent / "data"
+GRAPH_PATH = DATA_DIR / "graphbot.db"
 
 
 def seed(store: GraphStore) -> None:
@@ -145,8 +146,8 @@ def seed(store: GraphStore) -> None:
 
 
 if __name__ == "__main__":
-    GRAPH_DIR.mkdir(parents=True, exist_ok=True)
-    store = GraphStore(str(GRAPH_DIR))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    store = GraphStore(str(GRAPH_PATH))
     try:
         seed(store)
     finally:

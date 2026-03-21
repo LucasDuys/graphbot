@@ -47,9 +47,10 @@ _active_streams: dict[str, asyncio.Queue] = {}
 def get_orchestrator() -> Orchestrator:
     global _store, _orchestrator
     if _orchestrator is None:
-        graph_dir = Path(__file__).parent.parent / "data" / "graph"
-        graph_dir.mkdir(parents=True, exist_ok=True)
-        _store = GraphStore(str(graph_dir))
+        data_dir = Path(__file__).parent.parent / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        graph_path = data_dir / "graphbot.db"
+        _store = GraphStore(str(graph_path))
         _store.initialize()
         provider = OpenRouterProvider()
         router = ModelRouter(provider)
@@ -125,16 +126,15 @@ async def graph_stats() -> dict:
 
 
 async def _process_task(task_id: str, message: str, queue: asyncio.Queue) -> None:
-    """Process a task and emit events to the SSE queue."""
+    """Process a task and emit granular events to the SSE queue."""
     orchestrator = get_orchestrator()
 
-    # Emit start event
     await queue.put({
         "type": "task.started",
         "payload": {"task_id": task_id, "message": message, "timestamp": time.time()},
     })
 
-    # Emit intake event
+    # Step 1: Intake
     intake = orchestrator._intake.parse(message)
     await queue.put({
         "type": "intake.complete",
@@ -146,11 +146,89 @@ async def _process_task(task_id: str, message: str, queue: asyncio.Queue) -> Non
         },
     })
 
-    # Process through orchestrator
     try:
-        result = await orchestrator.process(message)
+        if intake.is_simple:
+            # Simple path: single node
+            await queue.put({
+                "type": "node.created",
+                "payload": {"id": "root", "description": message[:80], "domain": intake.domain.value, "complexity": intake.complexity, "is_atomic": True, "provides": [], "consumes": []},
+            })
+            await queue.put({"type": "node.status", "payload": {"node_id": "root", "status": "running"}})
 
-        # Emit completion
+            result = await orchestrator._executor.execute(message, intake.complexity)
+
+            await queue.put({"type": "node.status", "payload": {
+                "node_id": "root", "status": "completed" if result.success else "failed",
+                "tokens": result.total_tokens, "latency_ms": result.total_latency_ms,
+                "output": result.output[:200],
+            }})
+        else:
+            # Complex path: decompose then execute
+            await queue.put({"type": "decomposition.started", "payload": {}})
+
+            # Resolve entities + context
+            entity_ids: list[str] = []
+            for entity in intake.entities:
+                matches = orchestrator._resolver.resolve(entity, top_k=1)
+                for eid, confidence in matches:
+                    if confidence > 0.5 and eid not in entity_ids:
+                        entity_ids.append(eid)
+            context = orchestrator._store.get_context(entity_ids) if entity_ids else None
+
+            # Decompose
+            nodes = await orchestrator._decomposer.decompose(message, context)
+
+            # Emit all nodes
+            for node in nodes:
+                await queue.put({
+                    "type": "node.created",
+                    "payload": {
+                        "id": node.id, "description": node.description[:80],
+                        "domain": node.domain.value, "complexity": node.complexity,
+                        "is_atomic": node.is_atomic,
+                        "provides": list(node.provides), "consumes": list(node.consumes),
+                    },
+                })
+
+            # Emit edges (parent->child)
+            for node in nodes:
+                for child_id in node.children:
+                    await queue.put({
+                        "type": "edge.created",
+                        "payload": {"source": node.id, "target": child_id},
+                    })
+                for dep_id in node.requires:
+                    await queue.put({
+                        "type": "edge.created",
+                        "payload": {"source": dep_id, "target": node.id, "label": "depends"},
+                    })
+
+            # Execute via DAG executor
+            template = orchestrator._decomposer.last_template
+            orchestrator._dag_executor.aggregation_template = template
+
+            # Mark leaves as running
+            leaves = [n for n in nodes if n.is_atomic]
+            for leaf in leaves:
+                await queue.put({"type": "node.status", "payload": {"node_id": leaf.id, "status": "running"}})
+
+            result = await orchestrator._dag_executor.execute(nodes)
+
+            # Mark leaves as completed
+            for leaf in leaves:
+                await queue.put({"type": "node.status", "payload": {
+                    "node_id": leaf.id,
+                    "status": "completed" if result.success else "failed",
+                    "tokens": result.total_tokens // max(len(leaves), 1),
+                }})
+
+            # Graph update
+            try:
+                orchestrator._graph_updater.update(message, nodes, result)
+            except Exception:
+                pass
+
+        # Final result
         await queue.put({
             "type": "task.complete",
             "payload": {
@@ -170,7 +248,6 @@ async def _process_task(task_id: str, message: str, queue: asyncio.Queue) -> Non
             "payload": {"task_id": task_id, "error": str(exc)},
         })
 
-    # Signal end of stream
     await queue.put(None)
 
 

@@ -24,7 +24,8 @@ from graph.store import GraphStore  # noqa: E402
 from models.openrouter import OpenRouterProvider  # noqa: E402
 from models.router import ModelRouter  # noqa: E402
 
-GRAPH_DIR = Path(__file__).parent.parent / "data" / "graph"
+DATA_DIR = Path(__file__).parent.parent / "data"
+GRAPH_PATH = DATA_DIR / "graphbot.db"
 HISTORY: list[dict] = []
 
 
@@ -88,15 +89,15 @@ async def main() -> None:
         sys.exit(1)
 
     # Set up persistent graph
-    GRAPH_DIR.mkdir(parents=True, exist_ok=True)
-    store = GraphStore(str(GRAPH_DIR))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    store = GraphStore(str(GRAPH_PATH))
     store.initialize()
 
     provider = OpenRouterProvider()
     router = ModelRouter(provider)
     orchestrator = Orchestrator(store, router)
 
-    print("Ready. Knowledge graph at:", GRAPH_DIR)
+    print("Ready. Knowledge graph at:", GRAPH_PATH)
     print()
 
     try:
