@@ -31,6 +31,10 @@ def setup_langsmith() -> bool:
 
     os.environ.setdefault("LANGCHAIN_PROJECT", "graphbot")
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGSMITH_TRACING", "true")
+    os.environ.setdefault("LANGSMITH_PROJECT", "graphbot")
+    # EU endpoint for LangSmith
+    os.environ.setdefault("LANGSMITH_ENDPOINT", "https://eu.api.smith.langchain.com")
 
     import litellm
 

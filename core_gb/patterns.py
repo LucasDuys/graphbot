@@ -210,6 +210,7 @@ class PatternStore:
             "success_count": pattern.success_count,
             "avg_tokens": pattern.avg_tokens,
             "avg_latency_ms": pattern.avg_latency_ms,
+            "tree_template": pattern.tree_template,
             "created_at": datetime.now(),
         }
         return self._store.create_node("PatternNode", props)
@@ -225,7 +226,7 @@ class PatternStore:
                 trigger=str(row.get("p.trigger_template", "")),
                 description=str(row.get("p.description", "")),
                 variable_slots=tuple(json.loads(row.get("p.variable_slots", "[]"))),
-                tree_template="",
+                tree_template=str(row.get("p.tree_template", "")),
                 success_count=int(row.get("p.success_count", 0)),
                 avg_tokens=float(row.get("p.avg_tokens", 0.0)),
                 avg_latency_ms=float(row.get("p.avg_latency_ms", 0.0)),

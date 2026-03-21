@@ -1,10 +1,10 @@
 ---
 phase: in_progress
 spec: phase4-patterns
-current_task: T030
+current_task: T031
 task_status: complete
-iteration: 22
-tokens_used: 82000
+iteration: 23
+tokens_used: 95000
 tokens_budget: 200000
 depth: standard
 autonomy: full
@@ -38,12 +38,13 @@ handoff_requested: false
 - T027: PatternExtractor -- extract reusable templates from completed task trees (6 tests, committed 0c6c65c)
 - T029: PatternStore -- graph-backed pattern persistence with save/load/increment (6 tests, committed c87e930)
 - T030: GraphUpdater -- graph update loop records task outcomes + patterns (7 tests)
+- T031: Wire pattern matching + graph updating into Orchestrator (4 tests, committed f0dd5af)
 
 ## In-Flight Work
 None.
 
 ## What's Next
-Continue Phase 4: wire GraphUpdater + PatternMatcher into orchestrator pipeline.
+Continue Phase 4: remaining pattern/graph integration tasks.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
