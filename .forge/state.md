@@ -1,9 +1,9 @@
 ---
-phase: complete
-spec: phase3-parallel-dag
-current_task: T026
+phase: in_progress
+spec: phase4-patterns
+current_task: T027
 task_status: complete
-iteration: 19
+iteration: 20
 tokens_used: 72000
 tokens_budget: 200000
 depth: standard
@@ -35,12 +35,13 @@ handoff_requested: false
 - T024: Wire rate limiter + circuit breaker into ModelRouter (5 tests, committed 7c4beea)
 
 - T025/T026: Orchestrator DAGExecutor integration (replaced sequential _execute_dag, committed 71c3620)
+- T027: PatternExtractor -- extract reusable templates from completed task trees (6 tests, committed 0c6c65c)
 
 ## In-Flight Work
 None.
 
 ## What's Next
-Phase 3 complete. Ready for Phase 4 (Pattern Learning + Caching).
+Continue Phase 4: pattern matching, caching, and graph integration.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
