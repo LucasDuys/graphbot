@@ -21,24 +21,24 @@ def load_env_local() -> None:
 
 load_env_local()
 
-from core_gb.executor import SimpleExecutor
+from core_gb.orchestrator import Orchestrator
 from graph.store import GraphStore
 from models.openrouter import OpenRouterProvider
 from models.router import ModelRouter
 
 
-async def run_test(executor: SimpleExecutor, task: str, complexity: int = 1) -> None:
+async def run_test(orchestrator: Orchestrator, message: str) -> None:
     print(f"\n{'='*60}")
-    print(f"Task: {task}")
-    print(f"Complexity: {complexity}")
+    print(f"Message: {message}")
     print(f"{'='*60}")
 
-    result = await executor.execute(task, complexity=complexity)
+    result = await orchestrator.process(message)
 
     status = "OK" if result.success else "FAIL"
     print(f"Status:   {status}")
     print(f"Model:    {result.model_used}")
-    print(f"Output:   {result.output[:300]}")
+    print(f"Nodes:    {result.total_nodes}")
+    print(f"Output:   {result.output[:400]}")
     print(f"Tokens:   {result.total_tokens} (context: {result.context_tokens})")
     print(f"Latency:  {result.total_latency_ms:.0f}ms")
     print(f"Cost:     ${result.total_cost:.6f}")
@@ -59,7 +59,7 @@ async def main() -> None:
     })
     store.create_node("Project", {
         "id": "graphbot", "name": "GraphBot", "path": "C:/dev/graphbot",
-        "language": "Python", "framework": "kuzu", "status": "phase1",
+        "language": "Python", "framework": "kuzu", "status": "phase2",
     })
     store.create_node("Memory", {
         "id": "mem1",
@@ -68,20 +68,18 @@ async def main() -> None:
     })
     store.create_edge("OWNS", "lucas", "graphbot")
 
-    executor = SimpleExecutor(store, router)
+    orchestrator = Orchestrator(store, router)
 
-    # Test 1: Simple math (complexity 1 -- small model)
-    await run_test(executor, "What is 247 * 38?", complexity=1)
+    # Test 1: Simple task (should skip decomposition)
+    await run_test(orchestrator, "What is 247 * 38?")
 
-    # Test 2: With graph context (complexity 1)
-    await run_test(executor, "What do you know about Lucas and GraphBot?", complexity=1)
+    # Test 2: Simple task with context
+    await run_test(orchestrator, "What do you know about Lucas?")
 
-    # Test 3: Harder question (complexity 3 -- 70B model)
+    # Test 3: Complex task (should trigger decomposition)
     await run_test(
-        executor,
-        "Explain in 2 sentences why a small model with perfect context "
-        "might outperform a large model with no context.",
-        complexity=3,
+        orchestrator,
+        "Compare the weather in Amsterdam, London, and Berlin"
     )
 
     store.close()
