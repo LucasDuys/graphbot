@@ -66,21 +66,26 @@ python scripts/compare.py "your task" # A/B comparison
 python -m pytest tests/ -v            # Run test suite (287 tests)
 ```
 
-## Test Results
+## Benchmark Results (15 tasks, 2026-03-21)
 
-| Test | Description | Nodes | Tokens | Cost |
-|------|-------------|-------|--------|------|
-| Simple math | "What is 247 * 38?" | 1 | 39 | $0.000001 |
-| Context query | "What do you know about Lucas?" | 1 | 151 | $0.000005 |
-| Parallel decomposition | "Compare weather in 3 cities" | 4 | 2,731 | $0.000318 |
+| Category | Tasks | Success | Avg Tokens | Avg Cost | Avg Latency |
+|----------|-------|---------|-----------|----------|-------------|
+| Simple (no decomposition) | 5 | 5/5 | 383 | $0.000015 | 11.5s |
+| Parallel (3+ concurrent leaves) | 5 | 5/5 | 3,545 | $0.000348 | 32.4s |
+| Sequential (ordered chain) | 5 | 5/5 | 3,044 | $0.000227 | 33.1s |
+| **Total** | **15** | **15/15** | **2,324** | **$0.000197** | **25.6s** |
+
+**Total cost for all 15 tasks: $0.003** -- effectively free.
+
+100% decomposition success rate on decomposable tasks. See [benchmarks/RESULTS.md](benchmarks/RESULTS.md) for full breakdown.
 
 ## Performance
 
-- **287 tests**, all passing
+- **309 tests**, all passing
 - **Entity resolution**: ~3ms (meets <10ms target)
 - **Pattern matching**: <5ms
-- **Parallel speedup**: independent leaves execute concurrently
-- **Cost**: $0.0003 for a 4-node parallel task on free models
+- **Decomposition success**: 100% on 70B models with JSON mode
+- **Cost**: $0.0002 average per task on free models
 
 ## Tech Stack
 
