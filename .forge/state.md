@@ -1,9 +1,9 @@
 ---
 phase: in-progress
 spec: phase2-decomposition
-current_task: T017
+current_task: T024
 task_status: complete
-iteration: 16
+iteration: 18
 tokens_used: 68000
 tokens_budget: 200000
 depth: standard
@@ -30,14 +30,15 @@ handoff_requested: false
 - T015: Tree structural validator (validate_tree, 15 tests, committed 6ca2947)
 - T016: Decomposer class -- LLM-based task decomposition (9 tests, committed b332e33)
 - T017: Orchestrator -- intake + decompose + execute pipeline (7 tests)
-
-**127 tests in test_core, all passing.**
+- T022: @traced decorator for pipeline stage timing (15 tests, committed 42c54e4)
+- T023: Parallel DAG executor with streaming topological dispatch (9 tests, committed 808a02f)
+- T024: Wire rate limiter + circuit breaker into ModelRouter (5 tests, committed 7c4beea)
 
 ## In-Flight Work
 None.
 
 ## What's Next
-Phase 2 complete. Ready for Phase 3 planning.
+Phase 3 continues.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
