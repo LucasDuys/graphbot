@@ -7,14 +7,14 @@
       "file_list"
     ],
     "difficulty": 1,
-    "success": false,
+    "success": true,
     "tool_used": false,
     "model": "",
-    "nodes": 3,
-    "tokens": 14331,
-    "latency_ms": 21725,
-    "cost": 0.00028755,
-    "output_preview": "## Python Files in graphbot Project\n\n* {\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase2-decomposition-frontier.md\", \".forge\\\\plans\\\\phase3-dag-executor-frontier.md\", \".fo",
+    "nodes": 2,
+    "tokens": 14311,
+    "latency_ms": 15152,
+    "cost": 0.00028649,
+    "output_preview": "There are 24377 Python files in the graphbot project directory: {\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase2-decomposition-frontier.md\", \".forge\\\\plans\\\\phase3-dag-ex",
     "errors": []
   },
   {
@@ -29,10 +29,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 1115,
-    "latency_ms": 11209,
-    "cost": 0.00011956,
-    "output_preview": "## CLAUDE Architecture Summary\n\n* [No data for point1]\n* [No data for point2]\n* [No data for point3]",
+    "tokens": 174,
+    "latency_ms": 2024,
+    "cost": 3.944e-05,
+    "output_preview": "There are [No data for file_count] Python files in the graphbot project directory: [No data for file_list]",
     "errors": []
   },
   {
@@ -46,14 +46,12 @@
     "success": false,
     "tool_used": false,
     "model": "",
-    "nodes": 3,
-    "tokens": 103,
-    "latency_ms": 8157,
-    "cost": 3.56e-06,
-    "output_preview": "## File Contents\n{\"success\": false, \"error\": \"No file path found\"}\n\n## Todo Comments\n{\"success\": false, \"stdout\": \"\", \"stderr\": \"Find: 'TODO': No such file or directory\\nFind: 'comments': No such file or directory\\nFind: 'in': No such file or directory\\nFind: 'file': No such file or directory\\nFind:",
-    "errors": [
-      "No file path found"
-    ]
+    "nodes": 2,
+    "tokens": 0,
+    "latency_ms": 8706,
+    "cost": 0.0,
+    "output_preview": "## File List\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase2-decomposition-frontier.md\", \".forge\\\\plans\\\\phase3-dag-executor-frontier.md\", \".forge\\\\plans\\\\phase4-pattern",
+    "errors": []
   },
   {
     "task_id": "real_04",
@@ -63,14 +61,14 @@
       "file_read"
     ],
     "difficulty": 2,
-    "success": true,
+    "success": false,
     "tool_used": false,
-    "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "nodes": 1,
-    "tokens": 713,
-    "latency_ms": 13205,
-    "cost": 0.00020664,
-    "output_preview": "To read a `pyproject.toml` file and list all dependencies with their version constraints, you can use Python's `toml` library. First, ensure you have the `toml` library installed:\n\n```bash\npip install toml\n```\n\nHere is a simple Python script that reads a `pyproject.toml` file and lists all dependenc",
+    "model": "",
+    "nodes": 3,
+    "tokens": 113,
+    "latency_ms": 7406,
+    "cost": 3.97e-06,
+    "output_preview": "## Dependencies from pyproject.toml\n\n{'express': '>18.1.0', 'body-parser': '~1.20.0', 'mongoose': '~6.4.1', 'express-validator': '^11.1.0'}",
     "errors": []
   },
   {
@@ -85,10 +83,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 573,
-    "latency_ms": 10192,
-    "cost": 1.371e-05,
-    "output_preview": "## Kuzu Graph Database Alternatives 2026\n\nThe top 3 search results are about: 1) A blog post discussing graph querying and visualization with Kuzu and G.V., 2) An anime recommendation page for 'Kuzu no Honkai', and 3) A description of an anime titled 'Kuzu no Honkai' on MyAnimeList.net.",
+    "tokens": 97,
+    "latency_ms": 2078,
+    "cost": 3.11e-06,
+    "output_preview": "## Dependencies from pyproject.toml\n\n[No data for dependency_list]",
     "errors": []
   },
   {
@@ -103,10 +101,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 3,
-    "tokens": 125,
-    "latency_ms": 6912,
-    "cost": 3.04e-06,
-    "output_preview": "Collected {\"success\": false, \"stdout\": \"\", \"stderr\": \"'Count' is not recognized as an internal or external command,\\r\\noperable program or batch file.\", \"exit_code\": 1} tests",
+    "tokens": 67,
+    "latency_ms": 9969,
+    "cost": 1.7e-06,
+    "output_preview": "Collected tests: {\"success\": false, \"stdout\": \"\", \"stderr\": \"'Count' is not recognized as an internal or external command,\\r\\noperable program or batch file.\", \"exit_code\": 1}",
     "errors": []
   },
   {
@@ -121,10 +119,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 3,
-    "tokens": 283,
-    "latency_ms": 34831,
-    "cost": 7.28e-05,
-    "output_preview": "## Comparison of Top 5 LLM API Providers by Rate Limits\n\nTo provide a comparison of the top 5 providers, I'll need to know what type of service or product you're referring to. However, I can give a general comparison based on common categories such as cloud storage, web hosting, or VPN services. Ass",
+    "tokens": 143,
+    "latency_ms": 13793,
+    "cost": 3.014e-05,
+    "output_preview": "## Comparison of Free LLM API Providers 2026\n\nThe top 5 providers by rate limits are: \n\n1. AWS (1,000,000 requests per second)\n2. Google Cloud (500,000 requests per second)\n3. Azure (200,000 requests per second)\n4. IBM Cloud (100,000 requests per second)\n5. Oracle Cloud (50,000 requests per second)",
     "errors": []
   },
   {
@@ -139,10 +137,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 103,
-    "latency_ms": 6457,
-    "cost": 3.5e-06,
-    "output_preview": "## Last 10 Commits Summary\n\nThe commit changes involve modifying existing code to improve its functionality, likely through bug fixes or enhancements. This may include updates to the codebase, refactoring existing code, and adding new features or functionality.",
+    "tokens": 112,
+    "latency_ms": 13020,
+    "cost": 3.92e-06,
+    "output_preview": "## Last 10 Git Commits\n\nGit log output displays a list of commits made to a repository, including commit hash, author, date, and a brief description of the changes made in each commit. The output can be customized using various options and formats to suit different needs.",
     "errors": []
   },
   {
@@ -157,10 +155,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 14466,
-    "latency_ms": 14247,
-    "cost": 0.0011806,
-    "output_preview": "## Tools in tools_gb Directory\n\n{'settings.json': 'configuration file for Claude settings', '.env.local': 'environment variables for local development', '.forge/config.json': 'configuration file for Forge', '.forge/plans/*.md': 'plans and documentation for different phases of a project', '.forge/spe",
+    "tokens": 140,
+    "latency_ms": 2945,
+    "cost": 2.924e-05,
+    "output_preview": "## Last 10 Git Commits\n\n[No data for summary]",
     "errors": []
   },
   {
@@ -175,10 +173,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 3,
-    "tokens": 1401,
-    "latency_ms": 28399,
-    "cost": 4.677e-05,
-    "output_preview": "## Relevant Papers or Projects\n\n['LLM Agents-Agent Development Kit (ADK)', 'https://google.github.io/adk-docs/agents/llm-agents/', 'Agent Development Kit (ADK) that utilizes Large Language Models (LLM) for non-deterministic behavior']",
+    "tokens": 387,
+    "latency_ms": 3896,
+    "cost": 1.593e-05,
+    "output_preview": "## Last 10 Git Commits\n\n[No data for summary]",
     "errors": []
   }
 ]

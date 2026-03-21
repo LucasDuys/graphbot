@@ -88,7 +88,9 @@ class IntakeParser:
         complexity = self._estimate_complexity(message)
         entities = self._extract_entities(message)
         multi_domain = self._has_multi_domain_signals(message)
-        is_simple = complexity <= 2 and len(entities) <= 1 and not multi_domain
+        # Tasks needing tools should always decompose (not be "simple")
+        needs_tool = self._needs_tool(message)
+        is_simple = complexity <= 2 and len(entities) <= 1 and not multi_domain and not needs_tool
 
         return IntakeResult(
             domain=domain,
@@ -166,6 +168,24 @@ class IntakeParser:
                     domains_hit += 1
                     break
         return domains_hit >= 2
+
+    @staticmethod
+    def _needs_tool(message: str) -> bool:
+        """Check if the message requires tool access (file, web, shell)."""
+        lower = message.lower()
+        tool_signals = [
+            # File operations
+            "read ", "read the", "open ", "list files", "list all", "find files",
+            "search for", "search the", ".py", ".md", ".json", ".toml", ".txt",
+            "directory", "folder", "pyproject", "readme", "claude.md",
+            # Web operations
+            "search the web", "fetch", "scrape", "browse", "url ", "http",
+            "look up", "find online",
+            # Shell operations
+            "run ", "run the", "execute", "git log", "git ", "pytest", "command",
+            "terminal", "shell", "pip ",
+        ]
+        return any(signal in lower for signal in tool_signals)
 
     def _extract_entities(self, message: str) -> list[str]:
         """Extract capitalized words that are not common stop words and are 3+ chars."""

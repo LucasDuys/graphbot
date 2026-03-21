@@ -183,7 +183,13 @@ Rules:
 4. Use depends_on for sequential dependencies between sibling nodes
 5. Use provides/consumes for typed data flow between nodes
 6. Task types: RETRIEVE (fetch data), WRITE (produce text), THINK (reason/analyze), CODE (write/fix code)
-7. Domains: file, web, code, comms, system, synthesis
+7. Domains -- CRITICAL: choose the right domain so the correct tool is used:
+   - "web": for ANY task that needs internet access (searching, fetching URLs, finding information online). Use task_type RETRIEVE.
+   - "file": for ANY task that reads, lists, or searches local files. Use task_type RETRIEVE.
+   - "code": for ANY task that runs shell commands (git log, pytest, echo, etc.). Use task_type CODE.
+   - "system": for math, logic, knowledge questions that need LLM reasoning. Use task_type THINK.
+   - "synthesis": for combining/summarizing results from other nodes. Use task_type WRITE.
+   If a task involves reading a file, the domain MUST be "file". If it involves web search, the domain MUST be "web". If it involves running a command, the domain MUST be "code".
 8. Maximum 3 levels deep, maximum 5 children per node
 9. Include an "output_template" with:
    - "aggregation_type": how to combine results ("concatenate" for lists, "template_fill" for structured, "merge_json" for data)
