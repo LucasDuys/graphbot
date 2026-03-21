@@ -1,9 +1,9 @@
 ---
 phase: in_progress
 spec: phase4-patterns
-current_task: T033
+current_task: T036_T037
 task_status: complete
-iteration: 24
+iteration: 26
 tokens_used: 100000
 tokens_budget: 200000
 depth: standard
@@ -40,12 +40,14 @@ handoff_requested: false
 - T030: GraphUpdater -- graph update loop records task outcomes + patterns (7 tests)
 - T031: Wire pattern matching + graph updating into Orchestrator (4 tests, committed f0dd5af)
 - T033: Seed graph, A/B comparison, canonical tests, quickstart docs (5 tests, committed 20cb649)
+- T035: Fix decomposition reliability -- JSON mode, repair-first retry, field defaults (4 new tests, committed 593f3ec)
+- T036/T037: 3-way comparison script + graph stats script (5 tests)
 
 ## In-Flight Work
 None.
 
 ## What's Next
-Continue Phase 5: integration and production readiness tasks.
+Continue Phase 6: benchmarks and production readiness tasks.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
