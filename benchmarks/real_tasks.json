@@ -1,0 +1,84 @@
+{
+  "tasks": [
+    {
+      "id": "real_01",
+      "description": "List all Python files in the graphbot project directory and count how many there are",
+      "category": "file",
+      "expected_behavior": "tool_file",
+      "tools_needed": ["file_list"],
+      "difficulty": 1
+    },
+    {
+      "id": "real_02",
+      "description": "Read the file CLAUDE.md and summarize the architecture in 3 bullet points",
+      "category": "file",
+      "expected_behavior": "tool_file_then_llm",
+      "tools_needed": ["file_read"],
+      "difficulty": 2
+    },
+    {
+      "id": "real_03",
+      "description": "Search for all TODO comments in Python files in the core_gb directory",
+      "category": "file",
+      "expected_behavior": "tool_file",
+      "tools_needed": ["file_search"],
+      "difficulty": 1
+    },
+    {
+      "id": "real_04",
+      "description": "Read pyproject.toml and list all dependencies with their version constraints",
+      "category": "file",
+      "expected_behavior": "tool_file_then_llm",
+      "tools_needed": ["file_read"],
+      "difficulty": 2
+    },
+    {
+      "id": "real_05",
+      "description": "Search the web for 'Kuzu graph database alternatives 2026' and summarize the top 3 results",
+      "category": "web",
+      "expected_behavior": "tool_web",
+      "tools_needed": ["web_search"],
+      "difficulty": 2
+    },
+    {
+      "id": "real_06",
+      "description": "Run the command 'python -m pytest tests/ --co -q' and count how many tests are collected",
+      "category": "shell",
+      "expected_behavior": "tool_shell",
+      "tools_needed": ["shell_run"],
+      "difficulty": 1
+    },
+    {
+      "id": "real_07",
+      "description": "Search the web for 'free LLM API providers 2026' and compare the top 5 providers by rate limits",
+      "category": "web",
+      "expected_behavior": "tool_web_then_llm",
+      "tools_needed": ["web_search_and_summarize"],
+      "difficulty": 3
+    },
+    {
+      "id": "real_08",
+      "description": "Run 'git log --oneline -10' and summarize what the last 10 commits changed",
+      "category": "shell",
+      "expected_behavior": "tool_shell_then_llm",
+      "tools_needed": ["shell_run"],
+      "difficulty": 2
+    },
+    {
+      "id": "real_09",
+      "description": "List all files in the tools_gb directory and explain what each tool does based on the filenames",
+      "category": "file",
+      "expected_behavior": "tool_file_then_llm",
+      "tools_needed": ["file_list"],
+      "difficulty": 2
+    },
+    {
+      "id": "real_10",
+      "description": "Search the web for 'recursive DAG execution LLM agents' and list 3 relevant papers or projects",
+      "category": "web",
+      "expected_behavior": "tool_web",
+      "tools_needed": ["web_search"],
+      "difficulty": 2
+    }
+  ]
+}
