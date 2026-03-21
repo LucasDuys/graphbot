@@ -1,8 +1,8 @@
 # GraphBot Progress
 
 ## Current Phase
-**Phase 3: Parallel DAG Execution -- COMPLETE**
-Next: Begin Phase 4 (Pattern Learning + Caching)
+**Phase 5: Integration + Quality -- COMPLETE**
+All 5 phases of the core engine are done. Next: optimization, real-world usage, UI.
 
 ## Completed
 - [x] Full architecture design (2026-03-20)
@@ -58,8 +58,24 @@ Next: Begin Phase 4 (Pattern Learning + Caching)
 - [x] T025/T026: Orchestrator integration -- replaced sequential _execute_dag with parallel DAGExecutor
 - **Total: 757 tests, all passing**
 
+## Phase 4 Completed (2026-03-21)
+- [x] T027: PatternExtractor -- extracts reusable templates from completed trees
+- [x] T028: PatternMatcher -- regex + Levenshtein matching against cached patterns
+- [x] T029: PatternStore -- pattern persistence in Kuzu graph (with tree_template)
+- [x] T030: GraphUpdater -- records Task/ExecutionTree nodes after execution
+- [x] T031: Orchestrator wiring -- pattern cache check before decomposition, graph update after
+- **Total: 282 tests, all passing**
+
+## Phase 5 Completed (2026-03-21)
+- [x] T033: Graph seed script (seed_graph.py) -- user, projects, services, memories
+- [x] T033: A/B comparison script (compare.py) -- GraphBot vs baseline single LLM
+- [x] T033: Canonical integration tests -- 5 test tasks with mocked provider
+- [x] T033: QUICKSTART.md documentation
+- [x] LangSmith EU endpoint configured, claude-agent-sdk installed
+- **Total: 287 tests, all passing**
+
 ## In Progress
-_Nothing -- ready for Phase 4._
+_Nothing -- all 5 phases complete._
 
 ## Blocked
 _Nothing blocked._
@@ -84,8 +100,8 @@ _Nothing blocked._
 ## Metrics
 | Metric | Target | Current | Notes |
 |--------|--------|---------|-------|
-| Lines of code (new) | <8,000 | ~1,200 | types + store + CRUD + context + resolver + provider + router + executor |
-| Test count | -- | 757 | All passing (Phase 3 complete) |
+| Lines of code (new) | <8,000 | ~3,500 | core_gb + graph + models + scripts + tests |
+| Test count | -- | 287 | All passing (Phase 5 complete) |
 | 2-hop query (100 nodes) | <1ms | ~13ms | Needs optimization (full table scan approach) |
 | Context assembly (100 nodes) | <10ms | ~23ms | Needs indexed queries |
 | Entity resolution (100 nodes) | <10ms | ~3ms | Meets target |
