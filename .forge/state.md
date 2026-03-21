@@ -1,10 +1,10 @@
 ---
-phase: complete
-spec: phase1-foundation
-current_task: null
-task_status: null
-iteration: 11
-tokens_used: 58000
+phase: in-progress
+spec: phase2-decomposition
+current_task: T017
+task_status: complete
+iteration: 16
+tokens_used: 68000
 tokens_budget: 200000
 depth: standard
 autonomy: full
@@ -24,13 +24,20 @@ handoff_requested: false
 - T010: Graph benchmarks (bench_graph.py, JSONL tracking, 9 tests, committed 1066af5)
 - T011: SimpleExecutor (E2E graph -> LLM -> result, 5 tests, committed 29c4742)
 
-**111 tests total, all passing.**
+- T012: IntakeParser (rule-based intent classification, 46 tests, committed 2d1ca14)
+- T013: Decomposition JSON schema + validator (12 tests, committed 52a0ee2)
+- T014: DecompositionPrompt XML-tag prompt builder (16 tests, committed 33bcff6)
+- T015: Tree structural validator (validate_tree, 15 tests, committed 6ca2947)
+- T016: Decomposer class -- LLM-based task decomposition (9 tests, committed b332e33)
+- T017: Orchestrator -- intake + decompose + execute pipeline (7 tests)
+
+**127 tests in test_core, all passing.**
 
 ## In-Flight Work
-None -- Phase 1 complete.
+None.
 
 ## What's Next
-Phase 2: Recursive Decomposition + Constrained JSON Output
+Phase 2 complete. Ready for Phase 3 planning.
 
 ## Key Decisions
 - OpenRouter as single provider gateway (user provides API key)
