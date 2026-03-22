@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import kuzu
 
 from core_gb.types import GraphContext
+from graph.activation import ActivationModel
 from graph.schema import EDGE_TYPES, NODE_TYPES, get_create_edge_cypher, get_create_node_cypher
 
 logger = logging.getLogger(__name__)
@@ -264,6 +265,41 @@ class GraphStore:
 
         return results
 
+    @staticmethod
+    def _node_activation_score(
+        activation_model: ActivationModel,
+        props: dict[str, object],
+    ) -> float:
+        """Compute ACT-R activation score for a node from its properties.
+
+        Extracts access_count and last_accessed from the node dict, defaulting
+        to zero/None for nodes that lack activation metadata.
+
+        Args:
+            activation_model: ActivationModel instance for score computation.
+            props: Node property dict (from Kuzu query results).
+
+        Returns:
+            Non-negative activation score as a float.
+        """
+        raw_count = props.get("access_count")
+        access_count: int = int(raw_count) if raw_count is not None else 0
+
+        raw_last = props.get("last_accessed")
+        last_accessed: datetime | None = None
+        if isinstance(raw_last, datetime):
+            last_accessed = raw_last
+        elif isinstance(raw_last, str) and raw_last.strip():
+            try:
+                last_accessed = datetime.fromisoformat(raw_last)
+            except ValueError:
+                pass
+
+        return activation_model.activation_score(
+            access_count=access_count,
+            last_accessed=last_accessed,
+        )
+
     def get_context(self, entity_ids: list[str], max_tokens: int = 2500) -> GraphContext:
         """Assemble context from the knowledge graph for given entities.
 
@@ -272,19 +308,21 @@ class GraphStore:
         - Connected memories (active ones where valid_until IS NULL)
         - Related entities via edges
 
-        Respects max_tokens budget using heuristic: tokens ~= word_count * 1.3
-        Truncates least-relevant results when over budget.
+        Nodes are ranked by ACT-R activation score (from ActivationModel) so
+        that higher-activation nodes are preferred in token budget allocation.
+        Respects max_tokens budget using heuristic: tokens ~= word_count * 1.3.
+        Lowest-activation nodes are trimmed first when budget is exceeded.
         """
         if not entity_ids:
             return GraphContext()
 
+        activation_model = ActivationModel()
+
         user_summary = ""
-        entities: list[dict[str, str]] = []
-        memories: list[str] = []
         seen_ids: set[str] = set()
 
-        # Collect all nodes within 2 hops
-        hop1_nodes: list[tuple[str, dict[str, object], int]] = []  # (table, props, hop_distance)
+        # Collect all nodes within 2 hops: (table, props, hop_distance)
+        hop_nodes: list[tuple[str, dict[str, object], int]] = []
 
         for eid in entity_ids:
             found = self._find_node_table(eid)
@@ -295,29 +333,32 @@ class GraphStore:
             if node_id in seen_ids:
                 continue
             seen_ids.add(node_id)
-            hop1_nodes.append((table_name, props, 0))
+            hop_nodes.append((table_name, props, 0))
 
             # 1-hop neighbors
             for neighbor_table, neighbor_props in self._get_connected_1hop(node_id, table_name):
                 nid = str(neighbor_props.get("id", ""))
                 if nid and nid not in seen_ids:
                     seen_ids.add(nid)
-                    hop1_nodes.append((neighbor_table, neighbor_props, 1))
+                    hop_nodes.append((neighbor_table, neighbor_props, 1))
 
                     # 2-hop neighbors
                     for hop2_table, hop2_props in self._get_connected_1hop(nid, neighbor_table):
                         h2id = str(hop2_props.get("id", ""))
                         if h2id and h2id not in seen_ids:
                             seen_ids.add(h2id)
-                            hop1_nodes.append((hop2_table, hop2_props, 2))
+                            hop_nodes.append((hop2_table, hop2_props, 2))
 
-        # Separate into entities and memories, build user_summary
-        entity_candidates: list[tuple[dict[str, str], int]] = []  # (entity_dict, hop_distance)
-        memory_candidates: list[tuple[str, int]] = []  # (content, hop_distance)
+        # Separate into entities and memories, build user_summary.
+        # Each candidate is scored by activation for ranking.
+        entity_candidates: list[tuple[dict[str, str], float]] = []  # (entity_dict, activation_score)
+        memory_candidates: list[tuple[str, float]] = []  # (content, activation_score)
 
         now = datetime.now(timezone.utc)
 
-        for table_name, props, hop in hop1_nodes:
+        for table_name, props, _hop in hop_nodes:
+            score = self._node_activation_score(activation_model, props)
+
             if table_name == "Memory":
                 # Filter: only active memories (valid_until is NULL or in the future)
                 valid_until = props.get("valid_until")
@@ -338,7 +379,7 @@ class GraphStore:
                             pass
                 content = str(props.get("content", ""))
                 if content:
-                    memory_candidates.append((content, hop))
+                    memory_candidates.append((content, score))
             elif table_name == "User":
                 name = str(props.get("name", ""))
                 role = str(props.get("role", ""))
@@ -352,7 +393,7 @@ class GraphStore:
                     "name": name,
                     "details": " | ".join([role, institution, interests]),
                 }
-                entity_candidates.append((entity_dict, hop))
+                entity_candidates.append((entity_dict, score))
             else:
                 name = str(props.get("name", props.get("id", "")))
                 detail_parts: list[str] = []
@@ -366,19 +407,20 @@ class GraphStore:
                     "name": name,
                     "details": ", ".join(detail_parts),
                 }
-                entity_candidates.append((entity_dict, hop))
+                entity_candidates.append((entity_dict, score))
 
-        # Sort: closer hops first. Within same hop, entities before memories.
-        entity_candidates.sort(key=lambda x: x[1])
-        memory_candidates.sort(key=lambda x: x[1])
+        # Sort by activation score descending: highest-activation nodes first.
+        # This ensures the token budget is allocated to the most relevant nodes.
+        entity_candidates.sort(key=lambda x: x[1], reverse=True)
+        memory_candidates.sort(key=lambda x: x[1], reverse=True)
 
         # Apply token budget: entities first, then memories.
-        # Truncate least-relevant (highest hop distance) first.
+        # Lowest-activation nodes are trimmed first (they are at the end).
         token_budget = max_tokens
         used_tokens = self._estimate_tokens(user_summary) if user_summary else 0
 
         final_entities: list[dict[str, str]] = []
-        for entity_dict, _hop in entity_candidates:
+        for entity_dict, _score in entity_candidates:
             text = f"{entity_dict.get('type', '')} {entity_dict.get('name', '')} {entity_dict.get('details', '')}"
             cost = self._estimate_tokens(text)
             if used_tokens + cost > token_budget:
@@ -387,7 +429,7 @@ class GraphStore:
             final_entities.append(entity_dict)
 
         final_memories: list[str] = []
-        for content, _hop in memory_candidates:
+        for content, _score in memory_candidates:
             cost = self._estimate_tokens(content)
             if used_tokens + cost > token_budget:
                 break
