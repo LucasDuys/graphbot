@@ -1,7 +1,7 @@
 ---
 phase: in_progress
 spec: phase4-patterns
-current_task: T091
+current_task: T097
 task_status: complete
 iteration: 29
 tokens_used: 100000
@@ -55,6 +55,7 @@ handoff_requested: false
 
 - T088/T089: Structured tool params + smart decomposition (15 tests, committed 8cd231f)
 - T090/T091: Tool failure retry + CodeEditAgent (12 tests, committed 398a6ab)
+- T097: Fix shell command extraction from task descriptions (14 tests, committed 0a4c67c)
 
 ## In-Flight Work
 None.
