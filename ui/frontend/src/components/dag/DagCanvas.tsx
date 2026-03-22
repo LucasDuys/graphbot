@@ -66,7 +66,7 @@ async function layoutNodes(
     target: e.target,
     label: e.label,
     animated: true,
-    style: { stroke: "var(--accent-data-flow)" },
+    style: { stroke: "var(--data-flow)" },
   }));
 
   return { nodes, edges };
@@ -96,7 +96,7 @@ export function DagCanvas() {
         fitView
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="var(--border-subtle)" gap={20} size={1} />
+        <Background color="var(--gray-5)" gap={20} size={1} />
         <Controls />
         <MiniMap
           nodeColor={(n) => {

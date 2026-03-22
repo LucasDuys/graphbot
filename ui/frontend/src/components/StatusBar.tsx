@@ -21,13 +21,13 @@ export function StatusBar() {
   return (
     <div style={{
       padding: "8px 20px",
-      borderBottom: "1px solid var(--border-primary)",
+      borderBottom: "1px solid var(--border-color)",
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
       fontSize: 12,
       fontFamily: "var(--font-mono)",
-      color: "var(--text-secondary)",
+      color: "var(--gray-9)",
     }}>
       <AnimatePresence mode="wait">
         <motion.span

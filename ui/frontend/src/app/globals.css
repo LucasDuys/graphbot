@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
+/* Override defaults with our design system */
 body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  font-family: var(--font-sans);
+  background: var(--gray-1);
+  color: var(--gray-11);
 }

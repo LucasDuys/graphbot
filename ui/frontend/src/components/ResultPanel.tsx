@@ -16,7 +16,7 @@ export function ResultPanel() {
         animate={{ opacity: 1, height: "auto" }}
         exit={{ opacity: 0, height: 0 }}
         style={{
-          borderTop: "1px solid var(--border-primary)",
+          borderTop: "1px solid var(--border-color)",
           maxHeight: 300,
           overflow: "auto",
         }}

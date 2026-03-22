@@ -1,36 +1,68 @@
+"use client";
+
 import { DagCanvas } from "@/components/dag/DagCanvas";
 import { TaskInput } from "@/components/TaskInput";
-import { StatusBar } from "@/components/StatusBar";
+import { StatusStepper } from "@/components/StatusStepper";
+import { NodeDetail } from "@/components/NodeDetail";
 import { ResultPanel } from "@/components/ResultPanel";
 
 export default function Home() {
   return (
-    <main style={{
+    <div style={{
       display: "flex",
       flexDirection: "column",
       height: "100vh",
-      background: "var(--bg-primary)",
-      color: "var(--text-primary)",
+      background: "var(--gray-1)",
+      color: "var(--gray-11)",
       fontFamily: "var(--font-sans)",
     }}>
+      {/* Top bar */}
       <header style={{
-        padding: "12px 20px",
-        borderBottom: "1px solid var(--border-primary)",
         display: "flex",
-        justifyContent: "space-between",
         alignItems: "center",
+        justifyContent: "space-between",
+        padding: "var(--space-3) var(--space-5)",
+        borderBottom: "1px solid var(--border-color)",
+        background: "var(--gray-2)",
       }}>
-        <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>GraphBot</h1>
-        <span style={{ fontSize: 12, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-          DAG Execution Monitor
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+          <span style={{ fontSize: "var(--text-lg)", fontWeight: 600 }}>GraphBot</span>
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--gray-8)", fontFamily: "var(--font-mono)" }}>v0.1.0</span>
+        </div>
+        <StatusStepper />
       </header>
-      <StatusBar />
-      <div style={{ flex: 1 }}>
-        <DagCanvas />
-      </div>
-      <ResultPanel />
+
+      {/* Task input */}
       <TaskInput />
-    </main>
+
+      {/* Main content */}
+      <div style={{
+        flex: 1,
+        display: "flex",
+        overflow: "hidden",
+      }}>
+        {/* Left: DAG Canvas */}
+        <div style={{ flex: "1 1 60%", borderRight: "1px solid var(--border-color)" }}>
+          <DagCanvas />
+        </div>
+
+        {/* Right: Details + Result */}
+        <div style={{
+          flex: "0 0 40%",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          minWidth: 320,
+          maxWidth: 500,
+        }}>
+          <div style={{ flex: 1, overflow: "auto", borderBottom: "1px solid var(--border-color)" }}>
+            <NodeDetail />
+          </div>
+          <div style={{ flex: 1, overflow: "auto" }}>
+            <ResultPanel />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
