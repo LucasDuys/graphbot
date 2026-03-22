@@ -64,6 +64,8 @@ class SimpleExecutor:
                     total_latency_ms=elapsed,
                     total_cost=0.0,
                     model_used=result.model_used,
+                    tools_used=1,
+                    llm_calls=0,
                     errors=result.errors,
                 )
 
@@ -144,6 +146,8 @@ class SimpleExecutor:
                 total_cost=completion.cost,
                 context_tokens=context.total_tokens,
                 model_used=completion.model,
+                tools_used=0,
+                llm_calls=1,
                 nodes=(root_id,),
                 errors=(),
             )

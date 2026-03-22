@@ -54,9 +54,6 @@ async def run_all() -> None:
             result = await orchestrator.process(task["description"])
             elapsed = (time.perf_counter() - start) * 1000
 
-            # Detect whether a tool was used (model_used starts with "tool:")
-            tool_used = result.model_used.startswith("tool:") if result.model_used else False
-
             entry: dict = {
                 "task_id": task["id"],
                 "category": task["category"],
@@ -64,7 +61,9 @@ async def run_all() -> None:
                 "tools_needed": task["tools_needed"],
                 "difficulty": task["difficulty"],
                 "success": result.success,
-                "tool_used": tool_used,
+                "tool_used": result.tools_used > 0,
+                "tools_count": result.tools_used,
+                "llm_count": result.llm_calls,
                 "model": result.model_used,
                 "nodes": result.total_nodes,
                 "tokens": result.total_tokens,
@@ -76,9 +75,10 @@ async def run_all() -> None:
             results.append(entry)
 
             status = "OK" if result.success else "FAIL"
-            tool_tag = "TOOL" if tool_used else "LLM"
+            tool_tag = "TOOL" if result.tools_used > 0 else "LLM"
             print(
                 f"  {status} | {tool_tag} | {result.model_used}"
+                f" | tools={result.tools_used} llm={result.llm_calls}"
                 f" | {result.total_tokens} tok | {elapsed:.0f}ms"
                 f" | ${result.total_cost:.6f}"
             )

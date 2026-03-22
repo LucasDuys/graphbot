@@ -213,6 +213,8 @@ class DAGExecutor:
         all_nodes: list[str] = []
         all_errors: list[str] = []
         all_success = True
+        tools_count = 0
+        llm_count = 0
 
         # Iterate in original leaf order for deterministic output
         for leaf in leaves:
@@ -225,6 +227,10 @@ class DAGExecutor:
             all_errors.extend(r.errors)
             if not r.success:
                 all_success = False
+            if r.model_used and r.model_used.startswith("tool:"):
+                tools_count += 1
+            elif r.total_tokens > 0:
+                llm_count += 1
 
         # Build leaf_outputs dict for the deterministic aggregator
         leaf_outputs: dict[str, str] = {}
@@ -265,6 +271,8 @@ class DAGExecutor:
             total_tokens=total_tokens,
             total_latency_ms=elapsed_ms,
             total_cost=total_cost,
+            tools_used=tools_count,
+            llm_calls=llm_count,
             nodes=tuple(all_nodes),
             errors=tuple(all_errors),
         )

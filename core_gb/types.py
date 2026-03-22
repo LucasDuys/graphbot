@@ -105,6 +105,8 @@ class ExecutionResult:
     total_cost: float = 0.0
     context_tokens: int = 0
     model_used: str = ""
+    tools_used: int = 0
+    llm_calls: int = 0
     nodes: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
 
