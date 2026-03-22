@@ -130,7 +130,10 @@ class ToolRegistry:
             elif method == "web_fetch":
                 result_data = await self._web.fetch(params.get("url", ""))
             elif method == "shell_run":
-                result_data = await self._shell.run(params.get("command", ""))
+                command = params.get("command", "")
+                if not command:
+                    command = self._extract_command(node.description)
+                result_data = await self._shell.run(command)
             elif method == "llm_reason":
                 return None
             else:
@@ -222,9 +225,49 @@ class ToolRegistry:
 
     async def _execute_shell(self, node: TaskNode) -> dict[str, Any]:
         """Route code/shell tasks to ShellTool."""
-        cmd_match = re.search(r"[`'\"]([^`'\"]+)[`'\"]", node.description)
-        command = cmd_match.group(1) if cmd_match else node.description
+        # If tool_params has a command, use it directly
+        if node.tool_params and node.tool_params.get("command"):
+            return await self._shell.run(node.tool_params["command"])
+
+        # Extract command from description
+        command = self._extract_command(node.description)
         return await self._shell.run(command)
+
+    @staticmethod
+    def _extract_command(description: str) -> str:
+        """Extract shell command from a task description."""
+        # Try backtick-quoted command first: `command here`
+        backtick = re.search(r'`([^`]+)`', description)
+        if backtick:
+            return backtick.group(1)
+
+        # Try single-quoted: 'command here'
+        single = re.search(r"'([^']+)'", description)
+        if single:
+            return single.group(1)
+
+        # Try double-quoted: "command here"
+        double = re.search(r'"([^"]+)"', description)
+        if double and not double.group(1).startswith("Run"):
+            return double.group(1)
+
+        # Strip common prefixes
+        text = description.strip()
+        prefixes = [
+            "Run the command ", "Run command ", "Run ", "Execute ",
+            "run the command ", "run command ", "run ", "execute ",
+        ]
+        for prefix in prefixes:
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+                # Remove trailing "and..." or "then..."
+                for suffix in [" and ", " then ", " to ", " in order"]:
+                    idx = text.find(suffix)
+                    if idx > 0:
+                        text = text[:idx]
+                return text.strip().strip("'\"")
+
+        return text
 
     def _no_tool_result(self, node: TaskNode, start: float) -> ExecutionResult:
         """Return error result for domains without tools."""
