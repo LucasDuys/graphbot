@@ -17,7 +17,23 @@ logger = logging.getLogger(__name__)
 
 
 class PatternMatcher:
-    """Matches incoming tasks against cached patterns using trigger templates."""
+    """Matches incoming tasks against cached patterns using trigger templates.
+
+    Supports three matching strategies (scored independently, best wins):
+    1. Regex-based structural matching (exact template match with slot extraction)
+    2. Levenshtein similarity on structural text
+    3. Semantic embedding similarity (requires an EmbeddingService)
+
+    Args:
+        embedding_service: Optional EmbeddingService for semantic matching.
+            When None, only regex and Levenshtein strategies are used.
+    """
+
+    def __init__(
+        self,
+        embedding_service: "EmbeddingService | None" = None,
+    ) -> None:
+        self._embedding_service = embedding_service
 
     @staticmethod
     def _success_rate_factor(pattern: Pattern) -> float:
@@ -134,10 +150,22 @@ class PatternMatcher:
     def _score_match(
         self, task: str, pattern: Pattern
     ) -> tuple[float, dict[str, str]]:
+        """Score a task against a pattern using three strategies.
+
+        Strategies (scored independently, best score wins):
+        1. Regex-based: exact template match with slot extraction -> 1.0
+        2. Levenshtein: edit-distance similarity on structural text
+        3. Semantic embedding: cosine similarity between embeddings
+
+        Returns:
+            (max_score, variable_bindings) where max_score is the best
+            of the three strategy scores.
+        """
         trigger = pattern.trigger
         bindings: dict[str, str] = {}
 
-        # Try regex-based matching: replace {slot_N} with (.+?) capture groups
+        # --- Strategy 1: Regex-based matching ---
+        # Replace {slot_N} with (.+?) capture groups
         slot_names = sorted(pattern.variable_slots)
         regex_pattern = re.escape(trigger)
         for slot in slot_names:
@@ -145,16 +173,17 @@ class PatternMatcher:
                 re.escape("{" + slot + "}"), "(.+?)"
             )
 
+        regex_score = 0.0
         try:
             match = re.fullmatch(regex_pattern, task, re.IGNORECASE)
             if match:
                 for i, slot in enumerate(slot_names):
                     bindings[slot] = match.group(i + 1)
-                return 1.0, bindings
+                regex_score = 1.0
         except re.error:
             pass
 
-        # Fallback: Levenshtein similarity on structural parts
+        # --- Strategy 2: Levenshtein similarity on structural parts ---
         # Strip slot placeholders from trigger to get structural text
         structural = re.sub(r"\{slot_\d+\}", "", trigger).strip()
         structural = re.sub(r"\s+", " ", structural)
@@ -162,10 +191,41 @@ class PatternMatcher:
         task_lower = task.lower().strip()
         structural_lower = structural.lower().strip()
 
-        if not structural_lower:
-            return 0.0, {}
+        levenshtein_score = 0.0
+        if structural_lower:
+            levenshtein_score = Levenshtein.ratio(task_lower, structural_lower)
 
-        score: float = Levenshtein.ratio(task_lower, structural_lower)
+        # --- Strategy 3: Semantic embedding similarity ---
+        embedding_score = 0.0
+        if self._embedding_service is not None and structural_lower:
+            try:
+                sim = self._embedding_service.similarity(
+                    task_lower, structural_lower
+                )
+                # Only accept embedding scores above the configured threshold
+                if sim >= self._embedding_service.similarity_threshold:
+                    embedding_score = sim
+                else:
+                    logger.debug(
+                        "Embedding similarity %.3f below threshold %.3f for "
+                        "pattern %s",
+                        sim,
+                        self._embedding_service.similarity_threshold,
+                        pattern.id,
+                    )
+            except Exception:
+                logger.debug(
+                    "Embedding similarity computation failed for pattern %s",
+                    pattern.id,
+                    exc_info=True,
+                )
+
+        # Final score: best of the three strategies
+        score = max(regex_score, levenshtein_score, embedding_score)
+
+        # If regex matched perfectly, bindings were already extracted above.
+        # For non-regex matches, bindings stay empty (no slot extraction possible
+        # from fuzzy/semantic matches alone).
         return score, bindings
 
 

@@ -53,6 +53,7 @@ dependencies = [
     "aiolimiter>=1.1.0,<2.0.0",
     "aiobreaker>=1.2.0,<2.0.0",
     "python-Levenshtein>=0.26.0,<1.0.0",
+    "numpy>=1.26.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -66,6 +67,9 @@ matrix = [
 ]
 langsmith = [
     "langsmith>=0.1.0",
+]
+embeddings = [
+    "sentence-transformers>=3.0.0,<4.0.0",
 ]
 ui = [
     "fastapi>=0.115.0",
