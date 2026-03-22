@@ -139,6 +139,19 @@ class DAGExecutor:
                 # Use tool registry for domains with registered tools
                 if self._tool_registry and node.is_atomic and self._tool_registry.has_tool(node.domain):
                     result = await self._tool_registry.execute(node)
+                    if not result.success:
+                        # Retry once after 1s
+                        await asyncio.sleep(1)
+                        result = await self._tool_registry.execute(node)
+                        if not result.success:
+                            # Fallback to LLM
+                            logger.warning(
+                                "Tool failed twice for node %s, falling back to LLM",
+                                node.id,
+                            )
+                            result = await self._executor.execute(
+                                task_text, node.complexity, provides_keys=_provides,
+                            )
                 else:
                     result = await self._executor.execute(task_text, node.complexity, provides_keys=_provides)
             except Exception as exc:
