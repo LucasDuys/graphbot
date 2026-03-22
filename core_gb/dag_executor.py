@@ -17,7 +17,12 @@ if TYPE_CHECKING:
 from core_gb.aggregator import Aggregator
 from core_gb.sanitizer import OutputSanitizer
 from core_gb.types import ExecutionResult, TaskNode
-from core_gb.verification import VerificationConfig, VerificationLayer1, VerificationLayer2
+from core_gb.verification import (
+    VerificationConfig,
+    VerificationLayer1,
+    VerificationLayer2,
+    VerificationResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,15 +217,20 @@ class DAGExecutor:
         - Layer 3: Runs if node.complexity >= verification_config.layer3_threshold
           AND verification_config.layer3_opt_in is True (not yet implemented).
 
+        Each verification pass appends its VerificationResult to the collected
+        list, which is attached to the returned ExecutionResult.
+
         Args:
             node: The TaskNode being verified.
             result: The ExecutionResult from node execution.
             task_text: The task description text (for building L2 messages).
 
         Returns:
-            Potentially updated ExecutionResult after verification.
+            Potentially updated ExecutionResult after verification, with
+            verification_results populated.
         """
         cfg = self._verification_config
+        collected_vrs: list[VerificationResult] = []
 
         # Layer 1: rule-based format/type checks with single retry
         if cfg.layer1_enabled:
@@ -230,6 +240,28 @@ class DAGExecutor:
                 executor=self._executor,
                 expects_json=False,
             )
+            collected_vrs.append(vr)
+
+            if vr.passed and vr.retry_count == 0:
+                logger.info(
+                    "Layer 1 verification passed for node %s",
+                    node.id,
+                )
+            elif vr.passed and vr.retry_count > 0:
+                logger.warning(
+                    "Layer 1 verification failed for node %s, "
+                    "retry succeeded (retry_count=%d)",
+                    node.id,
+                    vr.retry_count,
+                )
+            else:
+                logger.warning(
+                    "Layer 1 verification failed for node %s: %s (retry_count=%d)",
+                    node.id,
+                    "; ".join(vr.issues),
+                    vr.retry_count,
+                )
+
             if verified_output != result.output:
                 result = ExecutionResult(
                     root_id=result.root_id,
@@ -245,6 +277,7 @@ class DAGExecutor:
                     llm_calls=result.llm_calls,
                     nodes=result.nodes,
                     errors=result.errors,
+                    verification_results=tuple(collected_vrs),
                 )
 
         # Layer 2: self-consistency via 3-way sampling
@@ -261,12 +294,33 @@ class DAGExecutor:
             sampling_result = await self._layer2_verifier.verify(
                 node, messages,
             )
-            if sampling_result.low_confidence:
-                logger.warning(
-                    "Layer 2 low confidence for node %s (score=%.2f)",
+
+            l2_passed = not sampling_result.low_confidence
+            l2_vr = VerificationResult(
+                passed=l2_passed,
+                issues=(
+                    [f"Low confidence (score={sampling_result.agreement_score:.2f})"]
+                    if not l2_passed
+                    else []
+                ),
+                layer=2,
+                retry_count=0,
+            )
+            collected_vrs.append(l2_vr)
+
+            if l2_passed:
+                logger.info(
+                    "Layer 2 verification passed for node %s (score=%.2f)",
                     node.id,
                     sampling_result.agreement_score,
                 )
+            else:
+                logger.warning(
+                    "Layer 2 verification failed for node %s (score=%.2f)",
+                    node.id,
+                    sampling_result.agreement_score,
+                )
+
             # Update result with L2 output and aggregated cost/tokens
             result = ExecutionResult(
                 root_id=result.root_id,
@@ -282,6 +336,7 @@ class DAGExecutor:
                 llm_calls=result.llm_calls,
                 nodes=result.nodes,
                 errors=result.errors,
+                verification_results=tuple(collected_vrs),
             )
 
         # Layer 3: CRITIC-style knowledge graph verification (placeholder)
@@ -294,6 +349,25 @@ class DAGExecutor:
                 "but not yet implemented",
                 node.id,
                 node.complexity,
+            )
+
+        # Attach collected verification results to the final result
+        if collected_vrs and result.verification_results != tuple(collected_vrs):
+            result = ExecutionResult(
+                root_id=result.root_id,
+                output=result.output,
+                success=result.success,
+                total_nodes=result.total_nodes,
+                total_tokens=result.total_tokens,
+                total_latency_ms=result.total_latency_ms,
+                total_cost=result.total_cost,
+                context_tokens=result.context_tokens,
+                model_used=result.model_used,
+                tools_used=result.tools_used,
+                llm_calls=result.llm_calls,
+                nodes=result.nodes,
+                errors=result.errors,
+                verification_results=tuple(collected_vrs),
             )
 
         return result
@@ -341,6 +415,7 @@ class DAGExecutor:
         total_cost = 0.0
         all_nodes: list[str] = []
         all_errors: list[str] = []
+        all_verification_results: list[VerificationResult] = []
         all_success = True
         tools_count = 0
         llm_count = 0
@@ -354,6 +429,7 @@ class DAGExecutor:
             total_cost += r.total_cost
             all_nodes.extend(r.nodes)
             all_errors.extend(r.errors)
+            all_verification_results.extend(r.verification_results)
             if not r.success:
                 all_success = False
             if r.model_used and r.model_used.startswith("tool:"):
@@ -408,4 +484,5 @@ class DAGExecutor:
             llm_calls=llm_count,
             nodes=tuple(all_nodes),
             errors=tuple(all_errors),
+            verification_results=tuple(all_verification_results),
         )

@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from core_gb.verification import VerificationResult
 
 
 class TaskStatus(str, Enum):
@@ -116,6 +119,7 @@ class ExecutionResult:
     llm_calls: int = 0
     nodes: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
+    verification_results: tuple[VerificationResult, ...] = ()
 
 
 @dataclass(frozen=True)

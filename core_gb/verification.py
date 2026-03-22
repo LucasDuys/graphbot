@@ -108,6 +108,53 @@ class VerificationResult:
     retry_count: int = 0
 
 
+def aggregate_verification_stats(
+    results: tuple[VerificationResult, ...] | list[VerificationResult],
+) -> dict[str, object]:
+    """Compute aggregate statistics from a sequence of VerificationResult objects.
+
+    Returns a dict with:
+        total_verifications: Total number of verification passes.
+        pass_rate: Fraction of verifications that passed (1.0 if none).
+        total_retries: Sum of retry_count across all results.
+        per_layer: Dict mapping layer number to per-layer breakdown with
+            keys 'total', 'passed', and 'retries'.
+
+    Args:
+        results: Sequence of VerificationResult objects to aggregate.
+
+    Returns:
+        Dict with aggregate stats.
+    """
+    total = len(results)
+    if total == 0:
+        return {
+            "total_verifications": 0,
+            "pass_rate": 1.0,
+            "total_retries": 0,
+            "per_layer": {},
+        }
+
+    passed_count = sum(1 for vr in results if vr.passed)
+    total_retries = sum(vr.retry_count for vr in results)
+
+    per_layer: dict[int, dict[str, int]] = {}
+    for vr in results:
+        if vr.layer not in per_layer:
+            per_layer[vr.layer] = {"total": 0, "passed": 0, "retries": 0}
+        per_layer[vr.layer]["total"] += 1
+        if vr.passed:
+            per_layer[vr.layer]["passed"] += 1
+        per_layer[vr.layer]["retries"] += vr.retry_count
+
+    return {
+        "total_verifications": total,
+        "pass_rate": passed_count / total,
+        "total_retries": total_retries,
+        "per_layer": per_layer,
+    }
+
+
 class VerificationLayer1:
     """Layer 1 format/type verification for DAG node outputs.
 
