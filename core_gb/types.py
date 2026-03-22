@@ -18,6 +18,7 @@ class TaskStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class FlowType(str, Enum):
@@ -60,6 +61,7 @@ class TaskNode:
 
     # Execution parameters
     is_atomic: bool = False
+    expandable: bool = False
     domain: Domain = Domain.SYNTHESIS
     complexity: int = 1
     flow_type: FlowType = FlowType.PARALLEL
@@ -81,6 +83,54 @@ class TaskNode:
     tokens_used: int = 0
     latency_ms: float = 0.0
     error: str | None = None
+
+
+@dataclass
+class ConditionalNode(TaskNode):
+    """A branch node that routes execution to then_branch or else_branch.
+
+    The condition is evaluated against predecessor output using simple string
+    matching (e.g. "contains 'valid'"). When the condition evaluates to True,
+    nodes listed in then_branch are executed and else_branch nodes are marked
+    SKIPPED. When False, else_branch executes and then_branch is SKIPPED.
+
+    ConditionalNode is not atomic -- it acts as a routing gate, not a unit of
+    work. The DAGExecutor handles condition evaluation and branch selection
+    during the dispatch loop.
+    """
+
+    condition: str = ""
+    then_branch: list[str] = field(default_factory=list)
+    else_branch: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LoopNode(TaskNode):
+    """A loop node that iteratively executes its body nodes until an exit
+    condition is met or max_iterations is reached.
+
+    Each iteration runs the body nodes (via the DAG executor), checks the
+    exit condition against the combined output, and -- if not satisfied --
+    feeds the previous iteration's output as context into the next iteration,
+    enabling retry-with-context behaviour.
+
+    LoopNode is not atomic -- it acts as a control flow wrapper. The
+    DAGExecutor.execute_loop method handles iteration, condition checking,
+    and context injection.
+
+    Attributes:
+        max_iterations: Hard cap on the number of iterations. Defaults to 3.
+        exit_condition: A string expression evaluated against the iteration
+            output. Format is ``"<check>:<value>"`` where ``<check>`` is a
+            predicate such as ``contains``. An empty string means no early
+            exit (runs until max_iterations).
+        body_nodes: Ordered list of node IDs that form the loop body. These
+            must be present in the nodes list passed to ``execute_loop``.
+    """
+
+    max_iterations: int = 3
+    exit_condition: str = ""
+    body_nodes: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

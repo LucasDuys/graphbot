@@ -11,12 +11,15 @@ from graphlib import TopologicalSorter
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from core_gb.decomposer import Decomposer
     from models.router import ModelRouter
     from tools_gb.registry import ToolRegistry
 
+import re
+
 from core_gb.aggregator import Aggregator
 from core_gb.sanitizer import OutputSanitizer
-from core_gb.types import ExecutionResult, TaskNode
+from core_gb.types import ConditionalNode, ExecutionResult, LoopNode, TaskNode, TaskStatus
 from core_gb.verification import (
     VerificationConfig,
     VerificationLayer1,
@@ -60,6 +63,7 @@ class DAGExecutor:
             else None
         )
         self._tool_registry = tool_registry
+        self._decomposer: Decomposer | None = None
         self.aggregation_template: dict | None = None
 
     async def execute(self, nodes: list[TaskNode]) -> ExecutionResult:
@@ -72,10 +76,19 @@ class DAGExecutor:
         4. Launch ready nodes concurrently, bounded by semaphore.
         5. As each completes, call sorter.done() to unblock dependents.
         6. Forward data from completed nodes to their dependents.
-        7. Aggregate all results into a single ExecutionResult.
+        7. Resolve conditional branches: evaluate conditions and skip branches.
+        8. Aggregate all results into a single ExecutionResult.
         """
         start = time.perf_counter()
         root_id = str(uuid.uuid4())
+
+        # Lazy expansion: replace expandable nodes with sub-DAGs from decomposer
+        nodes = await self._expand_nodes(nodes)
+
+        # Resolve conditional nodes: rewire branch dependencies and build
+        # the conditional registry for deferred evaluation during dispatch
+        nodes, conditional_registry = self._prepare_conditionals(nodes)
+        skipped_ids: set[str] = set()
 
         # Filter to leaf nodes only
         leaves = [n for n in nodes if n.is_atomic]
@@ -115,6 +128,10 @@ class DAGExecutor:
         while sorter.is_active():
             ready = sorter.get_ready()
             for node_id in ready:
+                # Skip nodes that were marked SKIPPED by conditional routing
+                if node_id in skipped_ids:
+                    sorter.done(node_id)
+                    continue
                 node = node_by_id[node_id]
                 task = asyncio.create_task(
                     self._execute_node(node, data_registry.copy())
@@ -140,7 +157,272 @@ class DAGExecutor:
                         if node.provides:
                             node.output_data[node.provides[0]] = output_text
 
-        return self._aggregate_results(root_id, leaves, results, node_by_id, start)
+                    # Evaluate any conditional nodes whose predecessor just completed
+                    newly_skipped = self._evaluate_conditionals(
+                        node_id, conditional_registry, data_registry, node_by_id,
+                    )
+                    skipped_ids.update(newly_skipped)
+
+        # Filter skipped nodes out of the leaves list for aggregation
+        active_leaves = [n for n in leaves if n.id not in skipped_ids]
+        return self._aggregate_results(root_id, active_leaves, results, node_by_id, start)
+
+    def _prepare_conditionals(
+        self,
+        nodes: list[TaskNode],
+    ) -> tuple[list[TaskNode], dict[str, ConditionalNode]]:
+        """Extract ConditionalNode instances and rewire branch dependencies.
+
+        For each ConditionalNode found:
+        - Record it in a registry keyed by the predecessor node IDs it consumes.
+        - Rewire branch nodes (then_branch and else_branch) so they depend on
+          the conditional node's prerequisites instead of the conditional node
+          itself. This lets the topological sorter place branch nodes after the
+          predecessor, while the dispatch loop decides which branch to activate.
+
+        Returns:
+            A tuple of (updated nodes list, conditional registry). The registry
+            maps predecessor node IDs to the ConditionalNode instances that
+            should be evaluated when that predecessor completes.
+        """
+        conditional_registry: dict[str, ConditionalNode] = {}
+        cond_ids: set[str] = set()
+
+        for node in nodes:
+            if isinstance(node, ConditionalNode):
+                cond_ids.add(node.id)
+                # Map each prerequisite to this conditional for later evaluation
+                for req_id in node.requires:
+                    conditional_registry[req_id] = node
+
+        if not cond_ids:
+            return nodes, conditional_registry
+
+        # Rewire branch nodes: replace dependency on the ConditionalNode with
+        # dependencies on the conditional's own prerequisites
+        for node in nodes:
+            if node.id in cond_ids:
+                continue
+            new_requires: list[str] = []
+            for req_id in node.requires:
+                if req_id in cond_ids:
+                    # Find the ConditionalNode this branch node depends on
+                    cond_node = next(
+                        n for n in nodes
+                        if isinstance(n, ConditionalNode) and n.id == req_id
+                    )
+                    # Inherit the conditional's prerequisites
+                    new_requires.extend(cond_node.requires)
+                else:
+                    new_requires.append(req_id)
+            node.requires = new_requires
+
+        return nodes, conditional_registry
+
+    @staticmethod
+    def _evaluate_condition(condition: str, text: str) -> bool:
+        """Evaluate a simple condition string against text.
+
+        Supported condition formats:
+        - "contains '<substring>'" -- True if substring is found in text
+          (case-insensitive).
+        - Any other string -- treated as a plain substring check
+          (case-insensitive).
+
+        Args:
+            condition: The condition expression to evaluate.
+            text: The text (predecessor output) to evaluate against.
+
+        Returns:
+            True if the condition matches, False otherwise.
+        """
+        # Parse "contains '<value>'" pattern
+        match = re.match(r"contains\s+'([^']*)'", condition, re.IGNORECASE)
+        if match:
+            substring = match.group(1)
+            return substring.lower() in text.lower()
+
+        # Fallback: plain substring check
+        return condition.lower() in text.lower()
+
+    def _evaluate_conditionals(
+        self,
+        completed_node_id: str,
+        conditional_registry: dict[str, ConditionalNode],
+        data_registry: dict[str, str],
+        node_by_id: dict[str, TaskNode],
+    ) -> set[str]:
+        """Check if a completed node triggers any conditional evaluations.
+
+        When a predecessor node completes, look up whether any ConditionalNode
+        was waiting on it. If so, gather the predecessor output from the data
+        registry, evaluate the condition, and mark the skipped branch nodes
+        with TaskStatus.SKIPPED.
+
+        Args:
+            completed_node_id: ID of the node that just completed.
+            conditional_registry: Map of predecessor IDs to ConditionalNodes.
+            data_registry: Current data registry with provides-key outputs.
+            node_by_id: Lookup dict for all nodes.
+
+        Returns:
+            Set of node IDs that should be skipped.
+        """
+        if completed_node_id not in conditional_registry:
+            return set()
+
+        cond_node = conditional_registry[completed_node_id]
+        skipped: set[str] = set()
+
+        # Gather predecessor output from data registry (consumed keys)
+        predecessor_output_parts: list[str] = []
+        for key in cond_node.consumes:
+            if key in data_registry:
+                predecessor_output_parts.append(data_registry[key])
+
+        # Fall back to the completed node's raw output if no consumed keys matched
+        if not predecessor_output_parts:
+            completed_node = node_by_id.get(completed_node_id)
+            if completed_node and completed_node.output_data:
+                first_key = next(iter(completed_node.output_data))
+                predecessor_output_parts.append(
+                    str(completed_node.output_data[first_key])
+                )
+
+        predecessor_text = " ".join(predecessor_output_parts)
+        condition_result = self._evaluate_condition(cond_node.condition, predecessor_text)
+
+        if condition_result:
+            # True: execute then_branch, skip else_branch
+            skip_ids = set(cond_node.else_branch)
+            logger.info(
+                "Conditional %s evaluated TRUE (condition='%s'), "
+                "routing to then_branch=%s, skipping else_branch=%s",
+                cond_node.id,
+                cond_node.condition,
+                cond_node.then_branch,
+                cond_node.else_branch,
+            )
+        else:
+            # False: execute else_branch, skip then_branch
+            skip_ids = set(cond_node.then_branch)
+            logger.info(
+                "Conditional %s evaluated FALSE (condition='%s'), "
+                "routing to else_branch=%s, skipping then_branch=%s",
+                cond_node.id,
+                cond_node.condition,
+                cond_node.else_branch,
+                cond_node.then_branch,
+            )
+
+        for skip_id in skip_ids:
+            target = node_by_id.get(skip_id)
+            if target is not None:
+                target.status = TaskStatus.SKIPPED
+                skipped.add(skip_id)
+
+        return skipped
+
+    async def _expand_nodes(self, nodes: list[TaskNode]) -> list[TaskNode]:
+        """Replace expandable nodes with sub-DAGs from the decomposer.
+
+        For each atomic node with expandable=True:
+        1. Invoke the decomposer on the node's task description.
+        2. Rewire the sub-DAG entry nodes to inherit the parent's upstream
+           dependencies (requires).
+        3. Rewire downstream nodes that depended on the parent to instead
+           depend on the sub-DAG's terminal nodes.
+        4. Remove the original expandable node and insert sub-DAG nodes.
+
+        If no decomposer is available, expandable nodes are left as-is and
+        executed directly (graceful fallback).
+        """
+        if self._decomposer is None:
+            return nodes
+
+        expandable = [n for n in nodes if n.is_atomic and n.expandable]
+        if not expandable:
+            return nodes
+
+        # Work with a mutable copy
+        result_nodes: list[TaskNode] = list(nodes)
+
+        for exp_node in expandable:
+            try:
+                sub_dag = await self._decomposer.decompose(exp_node.description)
+            except Exception as exc:
+                logger.warning(
+                    "Decomposition failed for expandable node %s, "
+                    "executing directly: %s",
+                    exp_node.id,
+                    exc,
+                )
+                continue
+
+            if not sub_dag:
+                logger.warning(
+                    "Decomposer returned empty sub-DAG for node %s, "
+                    "executing directly",
+                    exp_node.id,
+                )
+                continue
+
+            sub_leaves = [n for n in sub_dag if n.is_atomic]
+            if not sub_leaves:
+                logger.warning(
+                    "Sub-DAG for node %s has no atomic leaves, "
+                    "executing directly",
+                    exp_node.id,
+                )
+                continue
+
+            sub_ids = {n.id for n in sub_dag}
+
+            # Identify entry nodes: sub-DAG nodes with no requires within
+            # the sub-DAG (they need the parent's upstream deps)
+            entry_ids: set[str] = set()
+            for sn in sub_leaves:
+                internal_deps = {r for r in sn.requires if r in sub_ids}
+                if not internal_deps:
+                    entry_ids.add(sn.id)
+
+            # Identify terminal nodes: sub-DAG leaves that no other sub-DAG
+            # node depends on (downstream nodes will depend on these)
+            depended_on: set[str] = set()
+            for sn in sub_dag:
+                depended_on.update(r for r in sn.requires if r in sub_ids)
+            terminal_ids: set[str] = {
+                sn.id for sn in sub_leaves if sn.id not in depended_on
+            }
+
+            # Rewire entry nodes: inherit parent's upstream dependencies
+            for sn in sub_dag:
+                if sn.id in entry_ids:
+                    sn.requires = list(exp_node.requires) + [
+                        r for r in sn.requires if r not in sub_ids
+                    ]
+
+            # Rewire downstream nodes: replace dependency on parent with
+            # dependencies on terminal sub-DAG nodes
+            for node in result_nodes:
+                if exp_node.id in node.requires:
+                    node.requires = [
+                        r for r in node.requires if r != exp_node.id
+                    ] + list(terminal_ids)
+
+            # Remove expandable node and insert sub-DAG nodes
+            result_nodes = [n for n in result_nodes if n.id != exp_node.id]
+            result_nodes.extend(sub_dag)
+
+            logger.info(
+                "Expanded node %s into %d sub-nodes (entries=%s, terminals=%s)",
+                exp_node.id,
+                len(sub_dag),
+                sorted(entry_ids),
+                sorted(terminal_ids),
+            )
+
+        return result_nodes
 
     async def _execute_node(
         self,
@@ -486,3 +768,204 @@ class DAGExecutor:
             errors=tuple(all_errors),
             verification_results=tuple(all_verification_results),
         )
+
+    async def execute_loop(
+        self,
+        loop_node: LoopNode,
+        body_nodes: list[TaskNode],
+    ) -> ExecutionResult:
+        """Execute a LoopNode by iterating its body nodes with retry-with-context.
+
+        Each iteration:
+        1. Runs the body nodes via the existing DAG executor.
+        2. Checks the exit condition against the iteration output.
+        3. If the condition is met, returns immediately with the output.
+        4. If not, injects the previous iteration's output as context into
+           the body nodes for the next iteration.
+        5. Hard-stops at max_iterations regardless of the exit condition.
+
+        Args:
+            loop_node: The LoopNode describing iteration parameters.
+            body_nodes: The list of TaskNode instances that form the loop body.
+
+        Returns:
+            ExecutionResult from the final iteration (or the iteration that
+            satisfied the exit condition).
+        """
+        start = time.perf_counter()
+        root_id = loop_node.id
+
+        if loop_node.max_iterations <= 0:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "Loop %s has max_iterations=%d, skipping execution",
+                root_id,
+                loop_node.max_iterations,
+            )
+            return ExecutionResult(
+                root_id=root_id,
+                output="",
+                success=True,
+                total_nodes=0,
+                total_tokens=0,
+                total_latency_ms=elapsed_ms,
+                total_cost=0.0,
+            )
+
+        total_tokens = 0
+        total_cost = 0.0
+        all_errors: list[str] = []
+        previous_output: str = ""
+        last_result: ExecutionResult | None = None
+
+        for iteration in range(1, loop_node.max_iterations + 1):
+            logger.info(
+                "Loop %s: starting iteration %d/%d",
+                root_id,
+                iteration,
+                loop_node.max_iterations,
+            )
+
+            # Inject previous iteration context into body node descriptions
+            iteration_body = self._prepare_iteration_body(
+                body_nodes, previous_output, iteration,
+            )
+
+            # Execute the body nodes as a sub-DAG
+            iter_result = await self.execute(iteration_body)
+
+            total_tokens += iter_result.total_tokens
+            total_cost += iter_result.total_cost
+            all_errors.extend(iter_result.errors)
+            last_result = iter_result
+
+            # If any body node failed, stop the loop
+            if not iter_result.success:
+                logger.warning(
+                    "Loop %s: body failed on iteration %d",
+                    root_id,
+                    iteration,
+                )
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                return ExecutionResult(
+                    root_id=root_id,
+                    output=iter_result.output,
+                    success=False,
+                    total_nodes=iteration,
+                    total_tokens=total_tokens,
+                    total_latency_ms=elapsed_ms,
+                    total_cost=total_cost,
+                    errors=tuple(all_errors),
+                )
+
+            previous_output = iter_result.output
+
+            # Check exit condition
+            if self._check_exit_condition(
+                loop_node.exit_condition, iter_result.output,
+            ):
+                logger.info(
+                    "Loop %s: exit condition met on iteration %d",
+                    root_id,
+                    iteration,
+                )
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                return ExecutionResult(
+                    root_id=root_id,
+                    output=iter_result.output,
+                    success=True,
+                    total_nodes=iteration,
+                    total_tokens=total_tokens,
+                    total_latency_ms=elapsed_ms,
+                    total_cost=total_cost,
+                    errors=tuple(all_errors),
+                )
+
+        # Exhausted all iterations without meeting exit condition
+        logger.info(
+            "Loop %s: reached max_iterations (%d) without exit condition",
+            root_id,
+            loop_node.max_iterations,
+        )
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        final_output = last_result.output if last_result else ""
+        return ExecutionResult(
+            root_id=root_id,
+            output=final_output,
+            success=True,
+            total_nodes=loop_node.max_iterations,
+            total_tokens=total_tokens,
+            total_latency_ms=elapsed_ms,
+            total_cost=total_cost,
+            errors=tuple(all_errors),
+        )
+
+    def _prepare_iteration_body(
+        self,
+        body_nodes: list[TaskNode],
+        previous_output: str,
+        iteration: int,
+    ) -> list[TaskNode]:
+        """Create fresh copies of body nodes with previous iteration context injected.
+
+        On iteration 1, nodes are returned as-is. On subsequent iterations,
+        the previous iteration's output is prepended to each body node's
+        description so the executor can leverage prior context.
+
+        Args:
+            body_nodes: Original body node definitions.
+            previous_output: Output text from the previous iteration (empty on
+                first iteration).
+            iteration: 1-based iteration number.
+
+        Returns:
+            List of TaskNode copies ready for execution in this iteration.
+        """
+        import copy
+
+        copies: list[TaskNode] = []
+        for node in body_nodes:
+            node_copy = copy.copy(node)
+            if iteration > 1 and previous_output:
+                node_copy.description = (
+                    f"<previous_iteration output=\"{iteration - 1}\">\n"
+                    f"{previous_output}\n"
+                    f"</previous_iteration>\n\n"
+                    f"{node.description}"
+                )
+            copies.append(node_copy)
+        return copies
+
+    @staticmethod
+    def _check_exit_condition(condition: str, output: str) -> bool:
+        """Evaluate an exit condition string against iteration output.
+
+        Supported condition formats:
+        - ``""`` (empty): Never triggers early exit.
+        - ``"contains:<substring>"``: True if output contains the substring
+            (case-sensitive).
+
+        Args:
+            condition: The exit condition expression.
+            output: The iteration output to check.
+
+        Returns:
+            True if the condition is satisfied, False otherwise.
+        """
+        if not condition:
+            return False
+
+        if ":" not in condition:
+            logger.warning(
+                "Malformed exit condition (no colon separator): %r",
+                condition,
+            )
+            return False
+
+        check_type, _, value = condition.partition(":")
+
+        if check_type == "contains":
+            return value in output
+
+        logger.warning("Unknown exit condition type: %r", check_type)
+        return False
