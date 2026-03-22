@@ -252,7 +252,7 @@ class TestRouteCascade:
         assert call_args[0][1] == "cheapest"
 
     async def test_cascade_forwards_kwargs(self) -> None:
-        """Verify kwargs are forwarded to provider.complete."""
+        """Verify kwargs are forwarded to provider.complete (with token budget)."""
         provider = FakeProvider()
         result = _make_result(
             content="A valid JSON response with enough content to be confident.",
@@ -261,7 +261,7 @@ class TestRouteCascade:
         )
         provider._mock_complete.return_value = result
 
-        config = CascadeConfig(chain=["cheapest", "medium"])
+        config = CascadeConfig(chain=["cheapest", "medium"], base_tokens=256)
         router = ModelRouter(provider=provider, cascade_config=config)
 
         task = _make_task(complexity=1)
@@ -271,8 +271,11 @@ class TestRouteCascade:
             task, messages, response_format={"type": "json_object"}
         )
 
+        # Token budget directive is injected alongside caller kwargs.
         provider._mock_complete.assert_awaited_once_with(
-            messages, "cheapest", response_format={"type": "json_object"},
+            messages, "cheapest",
+            response_format={"type": "json_object"},
+            max_tokens=256,
         )
 
     async def test_provider_error_escalates_to_next_model(self) -> None:

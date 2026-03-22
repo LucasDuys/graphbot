@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from core_gb.confidence import ConfidenceEstimator
 from core_gb.types import CompletionResult, TaskNode
 from models.base import ModelProvider
 from models.circuit_breaker import CircuitBreakerManager
@@ -37,11 +38,14 @@ DEFAULT_CASCADE_CHAIN: list[str] = [
 _MIN_COMPLEXITY = 1
 _MAX_COMPLEXITY = 5
 
-# Confidence estimation constants
-_MIN_CONTENT_LENGTH = 10
-_SHORT_CONTENT_LENGTH = 50
-_MEDIUM_CONTENT_LENGTH = 200
-_MIN_TOKEN_COUNT = 5
+
+DEFAULT_COMPLEXITY_MULTIPLIERS: dict[int, float] = {
+    1: 1.0,
+    2: 1.5,
+    3: 2.0,
+    4: 3.0,
+    5: 4.0,
+}
 
 
 @dataclass
@@ -53,15 +57,24 @@ class CascadeConfig:
         confidence_threshold: Minimum confidence score (0.0-1.0) to accept a
             result without escalating to the next model.
         max_attempts: Maximum number of models to try in the chain.
+        base_tokens: Base token budget for leaf prompts. Multiplied by the
+            complexity multiplier to produce the final max_tokens directive.
+        complexity_multipliers: Mapping from complexity level (1-5) to a
+            multiplier applied to base_tokens.  Higher complexity tasks
+            receive larger token budgets.
     """
 
     chain: list[str] | None = None
     confidence_threshold: float = 0.7
     max_attempts: int = 3
+    base_tokens: int = 256
+    complexity_multipliers: dict[int, float] | None = None
 
     def __post_init__(self) -> None:
         if self.chain is None:
             self.chain = list(DEFAULT_CASCADE_CHAIN)
+        if self.complexity_multipliers is None:
+            self.complexity_multipliers = dict(DEFAULT_COMPLEXITY_MULTIPLIERS)
 
     @property
     def effective_max_attempts(self) -> int:
@@ -113,6 +126,7 @@ class ModelRouter:
         self._rate_limiter: RateLimiterManager | None = rate_limiter
         self._circuit_breaker: CircuitBreakerManager | None = circuit_breaker
         self._cascade_config: CascadeConfig | None = cascade_config
+        self._confidence_estimator: ConfidenceEstimator = ConfidenceEstimator()
 
     @property
     def rate_limiter(self) -> RateLimiterManager | None:
@@ -200,19 +214,31 @@ class ModelRouter:
         """Try the cheapest model first, escalate if result quality is low.
 
         Cascade strategy:
-        1. Start with the first (cheapest) model in the chain.
-        2. Call the provider with that model.
-        3. Estimate confidence from the result.
-        4. If confidence >= threshold, return the result.
-        5. If confidence < threshold, try the next model in the chain.
-        6. If a provider error occurs, skip to the next model.
-        7. If all models are exhausted (or max_attempts reached), return the
+        1. Compute a token budget based on task complexity.
+        2. Start with the first (cheapest) model in the chain.
+        3. Call the provider with that model, injecting max_tokens.
+        4. Estimate confidence using ConfidenceEstimator.
+        5. If confidence >= threshold, return the result.
+        6. If confidence < threshold, try the next model in the chain.
+        7. If a provider error occurs, skip to the next model.
+        8. If all models are exhausted (or max_attempts reached), return the
            last successful result. If no model succeeded, raise
            AllProvidersExhaustedError.
         """
         config = self._cascade_config or CascadeConfig()
         chain = config.chain or DEFAULT_CASCADE_CHAIN
         max_tries = min(config.effective_max_attempts, len(chain))
+
+        # Compute token budget directive from task complexity.
+        token_budget = self._confidence_estimator.compute_token_budget(
+            task.complexity, config,
+        )
+
+        # Merge max_tokens into kwargs (caller-supplied max_tokens takes
+        # precedence over the computed budget).
+        call_kwargs: dict[str, object] = dict(kwargs)
+        if "max_tokens" not in call_kwargs:
+            call_kwargs["max_tokens"] = token_budget
 
         errors: list[ProviderError] = []
         last_result: CascadeResult | None = None
@@ -222,7 +248,7 @@ class ModelRouter:
 
             try:
                 result = await self._providers[0].complete(
-                    messages, model, **kwargs
+                    messages, model, **call_kwargs
                 )
             except ProviderError as exc:
                 logger.debug(
@@ -241,7 +267,7 @@ class ModelRouter:
                 )
                 continue
 
-            confidence = self._estimate_confidence(result)
+            confidence = self._confidence_estimator.estimate(result, task)
             cascade_result = CascadeResult(
                 content=result.content,
                 model=result.model,
@@ -249,6 +275,7 @@ class ModelRouter:
                 tokens_out=result.tokens_out,
                 latency_ms=result.latency_ms,
                 cost=result.cost,
+                logprobs=result.logprobs,
                 confidence=confidence,
                 attempts=attempt_idx + 1,
                 escalated=attempt_idx > 0,
@@ -276,43 +303,16 @@ class ModelRouter:
 
     @staticmethod
     def _estimate_confidence(result: CompletionResult) -> float:
-        """Estimate confidence of a completion result based on heuristics.
+        """Estimate confidence of a completion result.
 
-        Scoring factors:
-        - Content length (empty or very short signals low quality)
-        - Output token count (very few tokens signals truncation or refusal)
-        - Non-empty content check (base requirement)
+        Delegates to ConfidenceEstimator with a minimal TaskNode for
+        backward compatibility.  Callers that have access to the full
+        TaskNode should use ``ConfidenceEstimator.estimate()`` directly.
 
         Returns a float between 0.0 and 1.0.
         """
-        content = result.content.strip()
+        from core_gb.types import TaskNode as _TN
 
-        # Empty content is always zero confidence.
-        if not content:
-            return 0.0
-
-        score = 0.0
-
-        # Content length scoring (0.0 to 0.5)
-        content_len = len(content)
-        if content_len >= _MEDIUM_CONTENT_LENGTH:
-            score += 0.5
-        elif content_len >= _SHORT_CONTENT_LENGTH:
-            score += 0.3
-        elif content_len >= _MIN_CONTENT_LENGTH:
-            score += 0.15
-        else:
-            score += 0.05
-
-        # Token count scoring (0.0 to 0.5)
-        tokens_out = result.tokens_out
-        if tokens_out >= 20:
-            score += 0.5
-        elif tokens_out >= _MIN_TOKEN_COUNT:
-            score += 0.3
-        elif tokens_out >= 2:
-            score += 0.1
-        else:
-            score += 0.0
-
-        return min(1.0, score)
+        estimator = ConfidenceEstimator()
+        stub_task = _TN(id="_static", description="")
+        return estimator.estimate(result, stub_task)

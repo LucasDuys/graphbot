@@ -82,7 +82,13 @@ class TaskNode:
 
 @dataclass(frozen=True)
 class CompletionResult:
-    """Result from a single LLM completion call."""
+    """Result from a single LLM completion call.
+
+    Attributes:
+        logprobs: Optional list of token log-probabilities returned by the
+            provider (e.g. OpenRouter). None when the provider does not
+            support or did not return logprobs.
+    """
 
     content: str
     model: str
@@ -90,6 +96,7 @@ class CompletionResult:
     tokens_out: int
     latency_ms: float
     cost: float
+    logprobs: list[float] | None = None
 
 
 @dataclass(frozen=True)
@@ -151,11 +158,17 @@ class GraphContext:
     relevant_entities: tuple[dict[str, str], ...] = ()
     active_memories: tuple[str, ...] = ()
     matching_patterns: tuple[Pattern, ...] = ()
+    reflections: tuple[dict[str, str], ...] = ()
     total_tokens: int = 0
     token_count: int = 0
 
     def format(self) -> str:
-        """Format context as a compact string for prompt injection."""
+        """Format context as a compact string for prompt injection.
+
+        Includes a PAST FAILURES section when reflections are available,
+        listing each reflection with its original task description, what
+        failed, the root cause, and what to try differently.
+        """
         parts: list[str] = []
         if self.user_summary:
             parts.append(f"USER: {self.user_summary}")
@@ -171,4 +184,14 @@ class GraphContext:
                 f"PATTERN: \"{pattern.trigger}\" available "
                 f"({pattern.success_count} successes, avg {pattern.avg_tokens:.0f} tokens)"
             )
+        if self.reflections:
+            for refl in self.reflections:
+                task_desc = refl.get("task_description", "unknown task")
+                what_failed = refl.get("what_failed", "")
+                why = refl.get("why", "")
+                what_to_try = refl.get("what_to_try", "")
+                parts.append(
+                    f"PAST FAILURE [{task_desc}]: "
+                    f"{what_failed} -- cause: {why} -- suggestion: {what_to_try}"
+                )
         return "\n".join(parts)
