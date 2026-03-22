@@ -11,13 +11,22 @@ from models.google import GoogleProvider
 from models.groq import GroqProvider
 from models.observability import setup_langsmith
 from models.openrouter import OpenRouterProvider
-from models.router import DEFAULT_MODEL_MAP, ModelRouter
+from models.router import (
+    DEFAULT_CASCADE_CHAIN,
+    DEFAULT_MODEL_MAP,
+    CascadeConfig,
+    CascadeResult,
+    ModelRouter,
+)
 
 setup_langsmith()
 
 __all__ = [
     "AllProvidersExhaustedError",
     "AuthError",
+    "CascadeConfig",
+    "CascadeResult",
+    "DEFAULT_CASCADE_CHAIN",
     "DEFAULT_MODEL_MAP",
     "GoogleProvider",
     "GroqProvider",
