@@ -12,6 +12,7 @@ from graphlib import TopologicalSorter
 from core_gb.aggregator import Aggregator
 from core_gb.sanitizer import OutputSanitizer
 from core_gb.types import ExecutionResult, TaskNode
+from core_gb.verification import VerificationLayer1
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class DAGExecutor:
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._aggregator = Aggregator()
         self._sanitizer = OutputSanitizer()
+        self._verifier = VerificationLayer1()
         self._tool_registry = tool_registry
         self.aggregation_template: dict | None = None
 
@@ -169,6 +171,36 @@ class DAGExecutor:
                     total_cost=0.0,
                     errors=(str(exc),),
                 )
+
+            # Layer 1 verification: run on every successful node output.
+            # JSON check is not applied here because the DAG aggregation
+            # layer already handles non-JSON output gracefully. The JSON
+            # check is available via VerificationLayer1.verify() for callers
+            # that explicitly know JSON was requested.
+            if result.success:
+                verified_output, vr = await self._verifier.verify_and_retry(
+                    output=result.output,
+                    node=node,
+                    executor=self._executor,
+                    expects_json=False,
+                )
+                if verified_output != result.output:
+                    # Replace output with the verified (retried) version
+                    result = ExecutionResult(
+                        root_id=result.root_id,
+                        output=verified_output,
+                        success=result.success,
+                        total_nodes=result.total_nodes,
+                        total_tokens=result.total_tokens,
+                        total_latency_ms=result.total_latency_ms,
+                        total_cost=result.total_cost,
+                        context_tokens=result.context_tokens,
+                        model_used=result.model_used,
+                        tools_used=result.tools_used,
+                        llm_calls=result.llm_calls,
+                        nodes=result.nodes,
+                        errors=result.errors,
+                    )
 
             return node.id, result
 
