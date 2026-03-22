@@ -10,6 +10,7 @@ import uuid
 from graphlib import TopologicalSorter
 
 from core_gb.aggregator import Aggregator
+from core_gb.sanitizer import OutputSanitizer
 from core_gb.types import ExecutionResult, TaskNode
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class DAGExecutor:
         self._executor = executor
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._aggregator = Aggregator()
+        self._sanitizer = OutputSanitizer()
         self._tool_registry = tool_registry
         self.aggregation_template: dict | None = None
 
@@ -102,12 +104,13 @@ class DAGExecutor:
                     results[node_id] = result
                     sorter.done(node_id)
 
-                    # Register provided data keys
+                    # Register provided data keys (sanitize before forwarding)
                     if result.success:
                         node = node_by_id[node_id]
-                        output_text = result.output
+                        output_text = self._sanitizer.sanitize(result.output)
                         for key in node.provides:
-                            data_registry[key] = node.output_data.get(key, output_text)
+                            raw_value = node.output_data.get(key, output_text)
+                            data_registry[key] = self._sanitizer.sanitize(raw_value)
                         if node.provides:
                             node.output_data[node.provides[0]] = output_text
 
@@ -233,29 +236,33 @@ class DAGExecutor:
                 llm_count += 1
 
         # Build leaf_outputs dict for the deterministic aggregator
+        # Sanitize all outputs before aggregation to prevent injection in final result
         leaf_outputs: dict[str, str] = {}
         for leaf in leaves:
             r = results.get(leaf.id)
             if r is None or not r.output:
                 continue
+            sanitized_output = self._sanitizer.sanitize(r.output)
             node = node_by_id[leaf.id]
             if node.provides:
                 try:
-                    parsed = json.loads(r.output)
+                    parsed = json.loads(sanitized_output)
                     if isinstance(parsed, dict):
                         for key in node.provides:
                             if key in parsed:
-                                leaf_outputs[key] = str(parsed[key])
+                                leaf_outputs[key] = self._sanitizer.sanitize(
+                                    str(parsed[key])
+                                )
                             else:
-                                leaf_outputs[key] = r.output
+                                leaf_outputs[key] = sanitized_output
                     else:
                         for key in node.provides:
-                            leaf_outputs[key] = r.output
+                            leaf_outputs[key] = sanitized_output
                 except json.JSONDecodeError:
                     for key in node.provides:
-                        leaf_outputs[key] = r.output
+                        leaf_outputs[key] = sanitized_output
             else:
-                leaf_outputs[f"output_{leaf.id}"] = r.output
+                leaf_outputs[f"output_{leaf.id}"] = sanitized_output
 
         aggregated = self._aggregator.aggregate(
             self.aggregation_template, leaf_outputs

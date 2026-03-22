@@ -152,7 +152,19 @@ def _compute_depth(nodes: list[dict[str, Any]]) -> int:
     return max_depth
 
 
-def validate_decomposition(data: dict[str, Any], *, max_depth: int = 3) -> list[str]:
+MAX_RECURSION_DEPTH: int = 5
+"""Hard limit on decomposition tree depth. Plans exceeding this are rejected."""
+
+MAX_TOTAL_NODES: int = 50
+"""Hard limit on total node count in a decomposition. Plans exceeding this are rejected."""
+
+
+def validate_decomposition(
+    data: dict[str, Any],
+    *,
+    max_depth: int = 3,
+    max_nodes: int = MAX_TOTAL_NODES,
+) -> list[str]:
     """Validate a decomposition output against the JSON schema.
 
     Returns a list of human-readable error messages. An empty list means
@@ -160,6 +172,7 @@ def validate_decomposition(data: dict[str, Any], *, max_depth: int = 3) -> list[
       - JSON schema conformance (required fields, types, enums)
       - Maximum tree depth <= max_depth (configurable, default 3)
       - Maximum children per node <= 5 (enforced by schema)
+      - Maximum total nodes <= max_nodes (default 50)
     """
     errors: list[str] = []
 
@@ -172,6 +185,12 @@ def validate_decomposition(data: dict[str, Any], *, max_depth: int = 3) -> list[
     nodes = data.get("nodes")
     if not isinstance(nodes, list):
         return errors
+
+    # Node count check (hard limit)
+    if len(nodes) > max_nodes:
+        errors.append(
+            f"Total node count {len(nodes)} exceeds maximum allowed {max_nodes}"
+        )
 
     # Depth check
     depth = _compute_depth(nodes)
@@ -493,13 +512,21 @@ class Decomposer:
         1. Build prompt via DecompositionPrompt
         2. Call ModelRouter with complexity 3 and JSON mode
         3. Parse JSON response
-        4. Validate against schema + tree structure
+        4. Validate against schema + tree structure (max depth 5, max nodes 50)
         5. On invalid: try json_repair on SAME response first
         6. If repair fails: second LLM call
         7. On second failure: fallback to single atomic node
         8. Convert to list[TaskNode]
+
+        Hard limits enforced regardless of max_depth parameter:
+        - Maximum recursion depth: MAX_RECURSION_DEPTH (5)
+        - Maximum total nodes: MAX_TOTAL_NODES (50)
         """
         self.last_template = None
+
+        # Enforce hard ceiling: caller may request lower depth, but never exceed 5
+        effective_depth = min(max_depth, MAX_RECURSION_DEPTH)
+
         messages = self._prompt_builder.build(task, context)
 
         # Create a dummy TaskNode for routing (complexity 3 for decomposition)
@@ -513,7 +540,7 @@ class Decomposer:
                 response_format={"type": "json_object"},
             )
             first_content = completion.content
-            result = self._parse_and_validate(first_content, max_depth)
+            result = self._parse_and_validate(first_content, effective_depth)
             if result is not None:
                 nodes, template = result
                 self.last_template = template
@@ -534,7 +561,7 @@ class Decomposer:
                         repaired_data = {"nodes": fixed_nodes}
                         if repaired.get("output_template"):
                             repaired_data["output_template"] = repaired["output_template"]
-                        errors = validate_decomposition(repaired_data, max_depth=max_depth)
+                        errors = validate_decomposition(repaired_data, max_depth=effective_depth)
                         tree_errors = validate_tree(fixed_nodes)
                         if not errors and not tree_errors:
                             self.last_template = repaired.get("output_template")
@@ -551,7 +578,7 @@ class Decomposer:
                 route_node, messages,
                 response_format={"type": "json_object"},
             )
-            result = self._parse_and_validate(completion2.content, max_depth)
+            result = self._parse_and_validate(completion2.content, effective_depth)
             if result is not None:
                 nodes, template = result
                 self.last_template = template
