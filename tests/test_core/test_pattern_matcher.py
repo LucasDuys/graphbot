@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from core_gb.patterns import PatternMatcher
 from core_gb.types import Pattern
 
@@ -159,3 +161,211 @@ class TestPatternMatcher:
         assert result is not None
         matched, _ = result
         assert matched.id == "fresh"
+
+
+class TestFailureDeprioritization:
+    """Tests for T132 -- failure deprioritization in PatternMatcher.
+
+    Patterns with success_rate < 20% are deprioritized:
+    - Skipped when alternatives exist
+    - Returned with warning when no alternatives
+    - 0% success rate (all failures) forces decomposition (always skipped)
+    - 0 executions treated as neutral
+    """
+
+    def test_zero_percent_success_rate_skipped_as_only_pattern(self) -> None:
+        """A pattern with 0% success rate (all failures) is always skipped,
+        even when it is the only matching pattern. This forces decomposition."""
+        matcher = PatternMatcher()
+        all_fail = Pattern(
+            id="all-fail",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Always fails",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=0,
+            failure_count=5,
+        )
+        result = matcher.match("Calculate 7 times 8", [all_fail])
+        assert result is None
+
+    def test_hundred_percent_success_rate_preferred(self) -> None:
+        """A pattern with 100% success rate is always preferred over others."""
+        matcher = PatternMatcher()
+        perfect = Pattern(
+            id="perfect",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Always succeeds",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=20,
+            failure_count=0,
+        )
+        mediocre = Pattern(
+            id="mediocre",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Sometimes fails",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=5,
+            failure_count=5,
+        )
+        result = matcher.match("Calculate 7 times 8", [mediocre, perfect])
+        assert result is not None
+        matched, _ = result
+        assert matched.id == "perfect"
+
+    def test_no_executions_treated_as_neutral(self) -> None:
+        """A pattern with 0 success and 0 failure is not penalized."""
+        matcher = PatternMatcher()
+        new_pattern = Pattern(
+            id="new",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Never used",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=0,
+            failure_count=0,
+        )
+        result = matcher.match("Calculate 7 times 8", [new_pattern])
+        assert result is not None
+        matched, _ = result
+        assert matched.id == "new"
+
+    def test_low_success_rate_skipped_when_alternative_exists(self) -> None:
+        """A pattern with <20% success rate is skipped when a better
+        alternative is available."""
+        matcher = PatternMatcher()
+        low_rate = Pattern(
+            id="low-rate",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Rarely succeeds",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=1,
+            failure_count=9,  # 10% success rate
+        )
+        good_rate = Pattern(
+            id="good-rate",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Usually succeeds",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=8,
+            failure_count=2,  # 80% success rate
+        )
+        result = matcher.match("Calculate 7 times 8", [low_rate, good_rate])
+        assert result is not None
+        matched, _ = result
+        assert matched.id == "good-rate"
+
+    def test_low_success_rate_returned_when_only_option(self) -> None:
+        """A pattern with <20% (but >0%) success rate is still returned
+        when no alternatives exist, but a warning is logged."""
+        matcher = PatternMatcher()
+        low_rate = Pattern(
+            id="low-rate",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Rarely succeeds",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=1,
+            failure_count=9,  # 10% success rate
+        )
+        # With a low threshold so the weighted score can still pass
+        result = matcher.match("Calculate 7 times 8", [low_rate], threshold=0.05)
+        assert result is not None
+        matched, _ = result
+        assert matched.id == "low-rate"
+
+    def test_low_success_rate_logs_warning_when_only_option(
+        self, caplog: "logging.LogRecord"
+    ) -> None:
+        """When a low-success-rate pattern is the only option, a warning
+        is logged."""
+        matcher = PatternMatcher()
+        low_rate = Pattern(
+            id="low-rate",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Rarely succeeds",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=1,
+            failure_count=9,  # 10% success rate
+        )
+        with caplog.at_level(logging.WARNING, logger="core_gb.patterns"):
+            matcher.match("Calculate 7 times 8", [low_rate], threshold=0.05)
+        assert any(
+            "low success rate" in record.message.lower()
+            for record in caplog.records
+        )
+
+    def test_zero_percent_skipped_even_with_low_threshold(self) -> None:
+        """A 0% pattern is skipped regardless of threshold setting."""
+        matcher = PatternMatcher()
+        all_fail = Pattern(
+            id="all-fail",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Always fails",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=0,
+            failure_count=3,
+        )
+        result = matcher.match("Calculate 7 times 8", [all_fail], threshold=0.0)
+        assert result is None
+
+    def test_multiple_low_rate_patterns_all_skipped_for_good_one(self) -> None:
+        """When multiple low-rate patterns exist alongside a good one,
+        only the good one is returned."""
+        matcher = PatternMatcher()
+        bad_1 = Pattern(
+            id="bad-1",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Bad pattern 1",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=1,
+            failure_count=19,  # 5% success rate
+        )
+        bad_2 = Pattern(
+            id="bad-2",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Bad pattern 2",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=1,
+            failure_count=8,  # ~11% success rate
+        )
+        good = Pattern(
+            id="good",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Good pattern",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=7,
+            failure_count=3,  # 70% success rate
+        )
+        result = matcher.match("Calculate 7 times 8", [bad_1, bad_2, good])
+        assert result is not None
+        matched, _ = result
+        assert matched.id == "good"
+
+    def test_boundary_exactly_twenty_percent_not_skipped(self) -> None:
+        """A pattern with exactly 20% success rate is NOT deprioritized
+        (the threshold is strictly less than 20%)."""
+        matcher = PatternMatcher()
+        boundary = Pattern(
+            id="boundary",
+            trigger="Calculate {slot_0} times {slot_1}",
+            description="Right at boundary",
+            variable_slots=("slot_0", "slot_1"),
+            tree_template="[]",
+            success_count=2,
+            failure_count=8,  # exactly 20% success rate
+        )
+        # With threshold=0.15 so the weighted score (1.0 * 0.20 = 0.20) passes
+        result = matcher.match("Calculate 7 times 8", [boundary], threshold=0.15)
+        assert result is not None
+        matched, _ = result
+        assert matched.id == "boundary"

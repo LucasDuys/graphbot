@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from datetime import datetime
@@ -11,6 +12,8 @@ import Levenshtein
 
 from core_gb.types import ExecutionResult, Pattern, TaskNode
 from graph.store import GraphStore
+
+logger = logging.getLogger(__name__)
 
 
 class PatternMatcher:
@@ -32,6 +35,21 @@ class PatternMatcher:
             return 1.0
         return pattern.success_count / total
 
+    # Patterns below this success rate are deprioritized (skipped when
+    # alternatives exist, returned with a warning otherwise).
+    LOW_SUCCESS_THRESHOLD: float = 0.20
+
+    def _success_rate(self, pattern: Pattern) -> float | None:
+        """Compute the success rate for a pattern.
+
+        Returns None if the pattern has never been executed (neutral),
+        otherwise returns success_count / (success_count + failure_count).
+        """
+        total = pattern.success_count + pattern.failure_count
+        if total == 0:
+            return None
+        return pattern.success_count / total
+
     def match(
         self, task: str, patterns: list[Pattern], threshold: float = 0.7
     ) -> tuple[Pattern, dict[str, str]] | None:
@@ -45,15 +63,52 @@ class PatternMatcher:
         2. Extract variable bindings from slots ({slot_0}, {slot_1}, etc.)
         3. Compute similarity between the structural parts
         4. Weight the raw score by the pattern's success rate factor
-        5. Return best match above threshold
+        5. Deprioritize patterns with success_rate < 20%:
+           - 0% success rate (all failures): always skip (force decomposition)
+           - <20% with alternatives: skip in favor of better patterns
+           - <20% with no alternatives: return with warning
+        6. Return best match above threshold
         """
         best_match: Pattern | None = None
         best_score = 0.0
         best_bindings: dict[str, str] = {}
 
+        # Track the best low-rate fallback in case no good patterns match
+        low_rate_fallback: Pattern | None = None
+        low_rate_fallback_score = 0.0
+        low_rate_fallback_bindings: dict[str, str] = {}
+
         for pattern in patterns:
+            success_rate = self._success_rate(pattern)
+
+            # 0% success rate with actual failures: skip entirely to force
+            # decomposition instead of reusing a known-bad pattern
+            if success_rate is not None and success_rate == 0.0:
+                logger.debug(
+                    "Skipping pattern %s (0%% success rate, %d failures)",
+                    pattern.id,
+                    pattern.failure_count,
+                )
+                continue
+
             raw_score, bindings = self._score_match(task, pattern)
             weighted_score = raw_score * self._success_rate_factor(pattern)
+
+            # Low success rate (<20%): track as fallback but do not select
+            # as best match -- prefer alternatives if they exist
+            if (
+                success_rate is not None
+                and success_rate < self.LOW_SUCCESS_THRESHOLD
+            ):
+                if (
+                    weighted_score >= threshold
+                    and weighted_score > low_rate_fallback_score
+                ):
+                    low_rate_fallback = pattern
+                    low_rate_fallback_score = weighted_score
+                    low_rate_fallback_bindings = bindings
+                continue
+
             if weighted_score >= threshold and weighted_score > best_score:
                 best_score = weighted_score
                 best_match = pattern
@@ -61,6 +116,19 @@ class PatternMatcher:
 
         if best_match is not None:
             return best_match, best_bindings
+
+        # No good patterns matched. Fall back to a low-rate pattern if one
+        # exists -- it is better than nothing, but log a warning.
+        if low_rate_fallback is not None:
+            rate = self._success_rate(low_rate_fallback)
+            logger.warning(
+                "Using pattern %s despite low success rate (%.1f%%). "
+                "No better alternatives available.",
+                low_rate_fallback.id,
+                (rate or 0.0) * 100,
+            )
+            return low_rate_fallback, low_rate_fallback_bindings
+
         return None
 
     def _score_match(
