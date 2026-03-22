@@ -11,10 +11,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 14311,
-    "latency_ms": 15152,
-    "cost": 0.00028649,
-    "output_preview": "There are 24377 Python files in the graphbot project directory: {\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase2-decomposition-frontier.md\", \".forge\\\\plans\\\\phase3-dag-ex",
+    "tokens": 62,
+    "latency_ms": 2604,
+    "cost": 1.48e-06,
+    "output_preview": "## File List\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase10a-prompt-quality-frontier.md\", \".forge\\\\plans\\\\phase10b-ui-redesign-frontier.md\", \".forge\\\\plans\\\\phase2-dec",
     "errors": []
   },
   {
@@ -29,10 +29,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 174,
-    "latency_ms": 2024,
-    "cost": 3.944e-05,
-    "output_preview": "There are [No data for file_count] Python files in the graphbot project directory: [No data for file_list]",
+    "tokens": 182,
+    "latency_ms": 2412,
+    "cost": 4.184e-05,
+    "output_preview": "## File Content\n     1 | # CLAUDE.md -- GraphBot Project Orchestration\n     2 | \n     3 | ## Identity\n     4 | \n     5 | You are the lead architect and sole developer of **GraphBot**, a recursive execution engine powered by a temporal knowledge graph that enables free/cheap LLMs to match the capabil",
     "errors": []
   },
   {
@@ -46,11 +46,11 @@
     "success": false,
     "tool_used": false,
     "model": "",
-    "nodes": 2,
-    "tokens": 0,
-    "latency_ms": 8706,
-    "cost": 0.0,
-    "output_preview": "## File List\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase2-decomposition-frontier.md\", \".forge\\\\plans\\\\phase3-dag-executor-frontier.md\", \".forge\\\\plans\\\\phase4-pattern",
+    "nodes": 3,
+    "tokens": 98,
+    "latency_ms": 47349,
+    "cost": 3.25e-06,
+    "output_preview": "## File List\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase10a-prompt-quality-frontier.md\", \".forge\\\\plans\\\\phase10b-ui-redesign-frontier.md\", \".forge\\\\plans\\\\phase2-dec",
     "errors": []
   },
   {
@@ -61,14 +61,14 @@
       "file_read"
     ],
     "difficulty": 2,
-    "success": false,
+    "success": true,
     "tool_used": false,
     "model": "",
     "nodes": 3,
-    "tokens": 113,
-    "latency_ms": 7406,
-    "cost": 3.97e-06,
-    "output_preview": "## Dependencies from pyproject.toml\n\n{'express': '>18.1.0', 'body-parser': '~1.20.0', 'mongoose': '~6.4.1', 'express-validator': '^11.1.0'}",
+    "tokens": 28126,
+    "latency_ms": 385058,
+    "cost": 0.00097976,
+    "output_preview": "## Dependencies from pyproject.toml\n\n['.claude/settings.json', '.dockerignore', '.env.local', '.forge/config.json', '.forge/plans/phase1-foundation-frontier.md', '.forge/plans/phase10a-prompt-quality-frontier.md', '.forge/plans/phase10b-ui-redesign-frontier.md', '.forge/plans/phase2-decomposition-fr",
     "errors": []
   },
   {
@@ -83,9 +83,9 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 97,
-    "latency_ms": 2078,
-    "cost": 3.11e-06,
+    "tokens": 99,
+    "latency_ms": 1829,
+    "cost": 3.21e-06,
     "output_preview": "## Dependencies from pyproject.toml\n\n[No data for dependency_list]",
     "errors": []
   },
@@ -100,11 +100,11 @@
     "success": false,
     "tool_used": false,
     "model": "",
-    "nodes": 3,
-    "tokens": 67,
-    "latency_ms": 9969,
-    "cost": 1.7e-06,
-    "output_preview": "Collected tests: {\"success\": false, \"stdout\": \"\", \"stderr\": \"'Count' is not recognized as an internal or external command,\\r\\noperable program or batch file.\", \"exit_code\": 1}",
+    "nodes": 2,
+    "tokens": 0,
+    "latency_ms": 8783,
+    "cost": 0.0,
+    "output_preview": "Collected {\"success\": false, \"stdout\": \"\", \"stderr\": \"'Count' is not recognized as an internal or external command,\\r\\noperable program or batch file.\", \"exit_code\": 1} tests",
     "errors": []
   },
   {
@@ -115,14 +115,14 @@
       "web_search_and_summarize"
     ],
     "difficulty": 3,
-    "success": false,
+    "success": true,
     "tool_used": false,
     "model": "",
-    "nodes": 3,
-    "tokens": 143,
-    "latency_ms": 13793,
-    "cost": 3.014e-05,
-    "output_preview": "## Comparison of Free LLM API Providers 2026\n\nThe top 5 providers by rate limits are: \n\n1. AWS (1,000,000 requests per second)\n2. Google Cloud (500,000 requests per second)\n3. Azure (200,000 requests per second)\n4. IBM Cloud (100,000 requests per second)\n5. Oracle Cloud (50,000 requests per second)",
+    "nodes": 2,
+    "tokens": 637,
+    "latency_ms": 15504,
+    "cost": 8.132e-05,
+    "output_preview": "## Top 5 Free LLM API Providers 2026\n\n{\"success\": true, \"results\": [{\"title\": \"Free LLM API Directory | 45+ Free AI Providers (2026)\", \"url\": \"https://free-llm.com/\", \"snippet\": \"While majorproviderslike OpenAI often charge per token, a growing ecosystem offreeLLMAPIshas emerged. ... offreeLLMAPIsin",
     "errors": []
   },
   {
@@ -133,14 +133,14 @@
       "shell_run"
     ],
     "difficulty": 2,
-    "success": false,
+    "success": true,
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 112,
-    "latency_ms": 13020,
-    "cost": 3.92e-06,
-    "output_preview": "## Last 10 Git Commits\n\nGit log output displays a list of commits made to a repository, including commit hash, author, date, and a brief description of the changes made in each commit. The output can be customized using various options and formats to suit different needs.",
+    "tokens": 336,
+    "latency_ms": 2594,
+    "cost": 8.34e-06,
+    "output_preview": "## Last 10 Commits\n\nThe changes include improvements to tool awareness, phase 10A and 10B specs, tool routing, and the addition of various tools such as web scraping/search tools, shell execution tools, file tools, and a tool registry.",
     "errors": []
   },
   {
@@ -155,10 +155,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 140,
-    "latency_ms": 2945,
-    "cost": 2.924e-05,
-    "output_preview": "## Last 10 Git Commits\n\n[No data for summary]",
+    "tokens": 207,
+    "latency_ms": 5609,
+    "cost": 4.934e-05,
+    "output_preview": "## Last 10 Commits\n\n[No data for summary]",
     "errors": []
   },
   {
@@ -173,10 +173,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 3,
-    "tokens": 387,
-    "latency_ms": 3896,
-    "cost": 1.593e-05,
-    "output_preview": "## Last 10 Git Commits\n\n[No data for summary]",
+    "tokens": 250,
+    "latency_ms": 1958,
+    "cost": 9.08e-06,
+    "output_preview": "## Last 10 Commits\n\n[No data for summary]",
     "errors": []
   }
 ]

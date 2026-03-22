@@ -51,6 +51,7 @@ handoff_requested: false
 - T065: Tool registry + DAG executor wiring (15 tests, committed 4dbcff5)
 
 - T067-T069: Real-world tool task suite + runner + tests (10 tasks, committed 89364f6)
+- T072-T074: Domain override + improved decomposition prompt + executor tool awareness (12 tests, committed f8628c6)
 
 ## In-Flight Work
 None.
