@@ -60,6 +60,19 @@ _NODE_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "maxItems": 5,
         },
+        "tool_method": {
+            "type": "string",
+            "enum": [
+                "file_read", "file_list", "file_search",
+                "web_search", "web_fetch",
+                "shell_run", "llm_reason",
+            ],
+            "description": "Specific tool to use. Required for file/web/code domain nodes.",
+        },
+        "tool_params": {
+            "type": "object",
+            "description": "Parameters for the tool. E.g. {path: 'file.py'} for file_read, {query: '...'} for web_search",
+        },
     },
     "additionalProperties": False,
 }
@@ -644,6 +657,8 @@ class Decomposer:
                 domain=domain,
                 complexity=raw.get("complexity", 1),
                 status=TaskStatus.CREATED,
+                tool_method=raw.get("tool_method"),
+                tool_params=raw.get("tool_params", {}),
             )
             result.append(node)
 

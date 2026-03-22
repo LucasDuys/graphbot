@@ -9,7 +9,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from enum import Enum
+
 from core_gb.types import Domain
+
+
+class TaskType(str, Enum):
+    ATOMIC = "atomic"
+    DATA_PARALLEL = "data_parallel"
+    SEQUENTIAL = "sequential"
+    INTEGRATED = "integrated"
 
 
 STOP_WORDS: frozenset[str] = frozenset({
@@ -45,6 +54,7 @@ class IntakeResult:
     entities: tuple[str, ...]
     is_simple: bool
     raw_message: str
+    task_type: TaskType = TaskType.ATOMIC
 
 
 class IntakeParser:
@@ -91,6 +101,7 @@ class IntakeParser:
         # Tasks needing tools should always decompose (not be "simple")
         needs_tool = self._needs_tool(message)
         is_simple = complexity <= 2 and len(entities) <= 1 and not multi_domain and not needs_tool
+        task_type = self._classify_task_type(message)
 
         return IntakeResult(
             domain=domain,
@@ -98,6 +109,7 @@ class IntakeParser:
             entities=tuple(entities),
             is_simple=is_simple,
             raw_message=message,
+            task_type=task_type,
         )
 
     def _classify_domain(self, message: str) -> Domain:
@@ -168,6 +180,40 @@ class IntakeParser:
                     domains_hit += 1
                     break
         return domains_hit >= 2
+
+    def _classify_task_type(self, message: str) -> TaskType:
+        """Classify task structure to decide decomposition strategy."""
+        lower = message.lower()
+
+        # INTEGRATED: comparison, contrast, tradeoff analysis
+        # Only when the task does NOT need external tools -- pure reasoning.
+        # If tools are needed, the data must be gathered first (decompose).
+        integrated_signals = [
+            "compare", "versus", " vs ", "contrast", "trade-off", "tradeoff",
+            "which is better", "pros and cons", "advantages and disadvantages",
+            "differences between", "similarities between",
+        ]
+        has_integrated_signal = any(s in lower for s in integrated_signals)
+        needs_tool = self._needs_tool(lower)
+        has_many_items = lower.count(",") + lower.count(" and ") >= 2
+        # Multi-step: conjunctions like "and also", "and then" signal compound tasks
+        compound_signals = [" and also ", " and then ", " plus ", " as well as "]
+        is_compound = any(s in lower for s in compound_signals)
+        if has_integrated_signal and not needs_tool and not has_many_items and not is_compound:
+            return TaskType.INTEGRATED
+
+        # SEQUENTIAL: ordered steps ("first...then...finally")
+        sequential_signals = ["first ", "then ", "after that", "finally ", "next ", "step "]
+        if sum(1 for s in sequential_signals if s in lower) >= 2:
+            return TaskType.SEQUENTIAL
+
+        # DATA_PARALLEL: multiple independent items
+        items = lower.count(",") + lower.count(" and ")
+        if items >= 2 and self._needs_tool(lower):
+            return TaskType.DATA_PARALLEL
+
+        # ATOMIC: everything else
+        return TaskType.ATOMIC
 
     @staticmethod
     def _needs_tool(message: str) -> bool:

@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ToolRegistry:
     """Maps domains to tool instances for DAG leaf execution."""
 
-    def __init__(self, workspace: str | None = None) -> None:
+    def __init__(self, workspace: str | None = None, router: Any | None = None) -> None:
         self._web = WebTool()
         self._file = FileTool(workspace=workspace)
         self._shell = ShellTool(workspace=workspace)
@@ -29,6 +29,10 @@ class ToolRegistry:
             Domain.FILE: self._file,
             Domain.CODE: self._shell,
         }
+        self._code_agent: Any | None = None
+        if router is not None:
+            from core_gb.code_agent import CodeEditAgent
+            self._code_agent = CodeEditAgent(self._file, self._shell, router)
 
     def has_tool(self, domain: Domain) -> bool:
         """Check if a domain has a registered tool."""
@@ -37,9 +41,14 @@ class ToolRegistry:
     async def execute(self, node: TaskNode) -> ExecutionResult:
         """Execute a leaf node using the appropriate tool.
 
-        Parses the node description to determine which tool method to call.
-        Falls back to returning an error for domains without tools.
+        If node.tool_method is set, routes directly via structured params.
+        Otherwise falls back to domain-based description parsing.
         """
+        if node.tool_method:
+            result = await self._execute_by_method(node)
+            if result is not None:
+                return result
+
         start = time.perf_counter()
         domain = node.domain
 
@@ -48,6 +57,12 @@ class ToolRegistry:
                 result_data = await self._execute_web(node)
             elif domain == Domain.FILE:
                 result_data = self._execute_file(node)
+                # Handle code agent sentinel from _execute_file
+                if result_data.get("_code_agent"):
+                    agent_result = await self._code_agent.edit(
+                        result_data["instruction"], result_data["path"],
+                    )
+                    return agent_result
             elif domain == Domain.CODE:
                 result_data = await self._execute_shell(node)
             else:
@@ -91,6 +106,73 @@ class ToolRegistry:
                 errors=(str(exc),),
             )
 
+    async def _execute_by_method(self, node: TaskNode) -> ExecutionResult | None:
+        """Execute using explicit tool_method and tool_params."""
+        method = node.tool_method
+        params = node.tool_params
+        start = time.perf_counter()
+
+        try:
+            result_data: dict[str, Any] | None = None
+
+            if method == "file_read":
+                result_data = self._file.read(params.get("path", ""))
+            elif method == "file_list":
+                result_data = self._file.list_dir(
+                    params.get("directory", "."), params.get("pattern", "*")
+                )
+            elif method == "file_search":
+                result_data = self._file.search(
+                    params.get("directory", "."), params.get("query", "")
+                )
+            elif method == "web_search":
+                result_data = await self._web.search(params.get("query", ""))
+            elif method == "web_fetch":
+                result_data = await self._web.fetch(params.get("url", ""))
+            elif method == "shell_run":
+                result_data = await self._shell.run(params.get("command", ""))
+            elif method == "llm_reason":
+                return None
+            else:
+                return None
+
+            elapsed = (time.perf_counter() - start) * 1000
+            output = (
+                result_data.get("content", "")
+                or result_data.get("stdout", "")
+                or json.dumps(result_data)
+            )
+            success = result_data.get("success", False)
+            errors: tuple[str, ...] = ()
+            if result_data.get("error"):
+                errors = (result_data["error"],)
+
+            return ExecutionResult(
+                root_id=node.id,
+                output=output,
+                success=success,
+                total_nodes=1,
+                total_tokens=0,
+                total_latency_ms=elapsed,
+                total_cost=0.0,
+                model_used=f"tool:{method}",
+                errors=errors,
+            )
+        except Exception as exc:
+            elapsed = (time.perf_counter() - start) * 1000
+            logger.error("Tool method %s failed for node %s: %s", method, node.id, exc)
+            return ExecutionResult(
+                root_id=node.id,
+                output="",
+                success=False,
+                total_nodes=1,
+                total_tokens=0,
+                total_latency_ms=elapsed,
+                total_cost=0.0,
+                model_used=f"tool:{method}",
+                errors=(str(exc),),
+            )
+
     async def _execute_web(self, node: TaskNode) -> dict[str, Any]:
         """Route web tasks to appropriate WebTool method."""
         desc = node.description.lower()
@@ -122,7 +204,10 @@ class ToolRegistry:
                 "success": False,
                 "error": "Write requires content -- not supported as atomic leaf",
             }
-        elif any(kw in desc for kw in ["edit", "replace", "change", "modify"]):
+        elif any(kw in desc for kw in ["edit", "replace", "change", "modify", "fix", "refactor", "update"]):
+            if self._code_agent and path:
+                # Defer to async code agent -- return sentinel for async handling
+                return {"_code_agent": True, "path": path, "instruction": node.description}
             return {
                 "success": False,
                 "error": "Edit requires old/new text -- not supported as atomic leaf",

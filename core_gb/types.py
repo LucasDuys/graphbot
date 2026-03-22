@@ -68,6 +68,10 @@ class TaskNode:
     input_data: dict[str, Any] = field(default_factory=dict)
     output_data: dict[str, Any] = field(default_factory=dict)
 
+    # Tool routing (Phase 11)
+    tool_method: str | None = None
+    tool_params: dict[str, str] = field(default_factory=dict)
+
     # Metadata
     created_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None

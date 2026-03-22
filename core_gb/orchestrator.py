@@ -11,7 +11,7 @@ from pathlib import Path
 from core_gb.dag_executor import DAGExecutor
 from core_gb.decomposer import Decomposer
 from core_gb.executor import SimpleExecutor
-from core_gb.intake import IntakeParser
+from core_gb.intake import IntakeParser, TaskType
 from core_gb.patterns import PatternMatcher, PatternStore
 from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode, TaskStatus
 from graph.resolver import EntityResolver
@@ -35,7 +35,7 @@ class Orchestrator:
         self._store = store
         self._router = router
         self._intake = IntakeParser()
-        self._tool_registry = ToolRegistry(workspace=str(Path.cwd()))
+        self._tool_registry = ToolRegistry(workspace=str(Path.cwd()), router=router)
         self._executor = SimpleExecutor(store, router, tool_registry=self._tool_registry)
         self._dag_executor = DAGExecutor(self._executor, tool_registry=self._tool_registry)
         self._decomposer = Decomposer(router)
@@ -93,7 +93,24 @@ class Orchestrator:
             self._graph_updater.update(message, [node], result)
             return result
 
+        # INTEGRATED tasks: single LLM call with full context, skip decomposition
+        if intake.task_type == TaskType.INTEGRATED:
+            result = await self._executor.execute(
+                message, max(intake.complexity, 3)
+            )
+            node = TaskNode(
+                id=str(uuid.uuid4()),
+                description=message,
+                is_atomic=True,
+                domain=Domain.SYNTHESIS,
+                complexity=max(intake.complexity, 3),
+                status=TaskStatus.READY,
+            )
+            self._graph_updater.update(message, [node], result)
+            return result
+
         # Complex path: resolve entities, get context, decompose, execute
+        # Applies to DATA_PARALLEL, SEQUENTIAL, and non-simple ATOMIC tasks
         entity_ids: list[str] = []
         for entity in intake.entities:
             matches = self._resolver.resolve(entity, top_k=1)
