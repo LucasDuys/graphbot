@@ -1,13 +1,23 @@
 """Knowledge graph schema definitions for Kuzu.
 
-Node types: User, Project, File, Service, Contact, Pattern, Memory, Task, Skill, ExecutionTree
+Node types: User, Project, File, Service, Contact, Pattern, Memory, Task, Skill, ExecutionTree, Goal
 Edge types: OWNS, USES, STUDIES_AT, ABOUT, PRODUCED, CREATED_PATTERN, DEPENDS_ON, CONTEXT_FROM,
-            INVOLVES, DERIVED_FROM, REFLECTION_OF, USED_SKILL
+            INVOLVES, DERIVED_FROM, REFLECTION_OF, USED_SKILL, DECOMPOSES_TO
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
+
+
+class GoalStatus(str, Enum):
+    """Status values for Goal nodes."""
+
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,12 @@ NODE_TYPES: list[NodeType] = [
         "total_latency_ms": "DOUBLE", "created_at": "TIMESTAMP",
         "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
+    NodeType("Goal", {
+        "id": "STRING", "description": "STRING", "status": "STRING",
+        "priority": "INT64", "deadline": "TIMESTAMP",
+        "progress": "DOUBLE", "created_at": "TIMESTAMP",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
+    }),
 ]
 
 # Edge type definitions
@@ -107,6 +123,7 @@ EDGE_TYPES: list[EdgeType] = [
     EdgeType("HAS_SKILL", "User", "Skill", {}),
     EdgeType("REFLECTION_OF", "Memory", "Task", {}),
     EdgeType("USED_SKILL", "Task", "Skill", {}),
+    EdgeType("DECOMPOSES_TO", "Goal", "Task", {}),
 ]
 
 
