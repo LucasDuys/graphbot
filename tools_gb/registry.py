@@ -13,6 +13,7 @@ from typing import Any
 
 from core_gb.types import Domain, ExecutionResult, TaskNode
 from tools_gb.browser import BrowserTool
+from tools_gb.browser_planner import BrowserPlanner
 from tools_gb.file import FileTool
 from tools_gb.shell import ShellTool
 from tools_gb.web import WebTool
@@ -68,15 +69,31 @@ class ToolRegistry:
             Domain.CODE: self._shell,
             Domain.BROWSER: self._browser,
         }
+        self._browser_planner = BrowserPlanner()
         self._stats: dict[str, ToolStats] = {}
         self._code_agent: Any | None = None
+        self._tool_factory: Any | None = None
         if router is not None:
             from core_gb.code_agent import CodeEditAgent
             self._code_agent = CodeEditAgent(self._file, self._shell, router)
 
+    def set_tool_factory(self, factory: Any) -> None:
+        """Attach a ToolFactory so generated tools are accessible via the registry."""
+        self._tool_factory = factory
+
     def has_tool(self, domain: Domain) -> bool:
         """Check if a domain has a registered tool."""
         return domain in self._domain_map
+
+    def has_generated_tool(self, name: str) -> bool:
+        """Check if a dynamically generated tool exists by name.
+
+        Looks up the attached ToolFactory's in-memory registry.
+        Returns False if no ToolFactory is attached.
+        """
+        if self._tool_factory is None:
+            return False
+        return self._tool_factory.get_tool(name) is not None
 
     # -- Quality tracking ----------------------------------------------------
 
@@ -379,41 +396,27 @@ class ToolRegistry:
         return await self._shell.run(command)
 
     async def _execute_browser(self, node: TaskNode) -> dict[str, Any]:
-        """Route browser tasks to appropriate BrowserTool method.
+        """Route browser tasks through the planner-grounder pattern.
 
-        Parses the task description to determine the browser action:
-        - URLs trigger navigate + extract_text
-        - 'click' keyword triggers click
-        - 'fill'/'type' keyword triggers fill
-        - 'screenshot' keyword triggers screenshot
-        - Default: navigate to URL if found, then extract text
+        The BrowserPlanner generates a structured navigation plan from the
+        task description, then the grounder executes each step sequentially
+        using the BrowserTool. This replaces ad-hoc description parsing with
+        a principled plan-then-execute approach.
+
+        Returns the grounding result dict with success, output, and error keys.
         """
-        desc = node.description.lower()
-        url_match = re.search(r"https?://[^\s]+", node.description)
-
-        if any(kw in desc for kw in ["screenshot", "capture"]):
-            if url_match:
-                await self._browser.navigate(url_match.group())
-            return await self._browser.screenshot()
-        elif any(kw in desc for kw in ["click"]):
-            selector_match = re.search(r"['\"`]([^'\"`]+)['\"`]", node.description)
-            selector = selector_match.group(1) if selector_match else "body"
-            return await self._browser.click(selector)
-        elif any(kw in desc for kw in ["fill", "type", "enter"]):
-            selector_match = re.search(r"['\"`]([^'\"`]+)['\"`]", node.description)
-            selector = selector_match.group(1) if selector_match else "input"
-            value_match = re.search(
-                r"(?:with|value)\s+['\"`]([^'\"`]+)['\"`]", node.description
-            )
-            value = value_match.group(1) if value_match else ""
-            return await self._browser.fill(selector, value)
-        elif url_match:
-            nav_result = await self._browser.navigate(url_match.group())
-            if not nav_result.get("success"):
-                return nav_result
-            return await self._browser.extract_text()
-        else:
-            return await self._browser.extract_text()
+        result = await self._browser_planner.plan_and_ground(
+            node.description, self._browser,
+        )
+        # Flatten the result to match the expected dict[str, Any] interface
+        # that the execute() method consumes (it reads "success" and "error").
+        output: dict[str, Any] = {
+            "success": result.get("success", False),
+            "content": result.get("output", ""),
+        }
+        if result.get("error"):
+            output["error"] = result["error"]
+        return output
 
     @staticmethod
     def _extract_command(description: str) -> str:

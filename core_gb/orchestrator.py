@@ -13,6 +13,7 @@ from core_gb.executor import SimpleExecutor
 from core_gb.intake import IntakeParser, TaskType
 from core_gb.patterns import PatternMatcher, PatternStore
 from core_gb.safety import IntentClassifier
+from core_gb.tool_factory import ToolFactory
 from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode, TaskStatus
 from core_gb.verification import VerificationConfig
 from core_gb.wave_event import WaveCompleteEvent
@@ -46,6 +47,14 @@ class Orchestrator:
         self._enable_replan = enable_replan
         self._intake = IntakeParser()
         self._tool_registry = ToolRegistry(workspace=str(Path.cwd()), router=router)
+        self._tool_factory = ToolFactory(router=router, store=store)
+        self._tool_registry.set_tool_factory(self._tool_factory)
+
+        # Load previously persisted tools from the knowledge graph.
+        loaded = self._tool_factory.load_from_graph()
+        if loaded > 0:
+            logger.info("Loaded %d persisted tool(s) from knowledge graph", loaded)
+
         self._executor = SimpleExecutor(store, router, tool_registry=self._tool_registry)
         self._dag_executor = DAGExecutor(
             self._executor,
