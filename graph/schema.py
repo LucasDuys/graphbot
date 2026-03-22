@@ -33,22 +33,27 @@ NODE_TYPES: list[NodeType] = [
     NodeType("User", {
         "id": "STRING", "name": "STRING", "role": "STRING",
         "institution": "STRING", "interests": "STRING",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("Project", {
         "id": "STRING", "name": "STRING", "path": "STRING",
         "language": "STRING", "framework": "STRING", "status": "STRING",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("File", {
         "id": "STRING", "path": "STRING", "type": "STRING",
         "description": "STRING",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("Service", {
         "id": "STRING", "name": "STRING", "type": "STRING",
         "url": "STRING", "status": "STRING",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("Contact", {
         "id": "STRING", "name": "STRING", "relationship": "STRING",
         "platform": "STRING",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("PatternNode", {
         "id": "STRING", "trigger_template": "STRING", "description": "STRING",
@@ -56,28 +61,33 @@ NODE_TYPES: list[NodeType] = [
         "failure_count": "INT64",
         "avg_tokens": "DOUBLE", "avg_latency_ms": "DOUBLE",
         "created_at": "TIMESTAMP", "last_used": "TIMESTAMP",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("Memory", {
         "id": "STRING", "content": "STRING", "category": "STRING",
         "confidence": "DOUBLE", "source_episode": "STRING",
         "valid_from": "TIMESTAMP", "valid_until": "TIMESTAMP",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("Task", {
         "id": "STRING", "description": "STRING", "domain": "STRING",
         "complexity": "INT64", "status": "STRING",
         "tokens_used": "INT64", "latency_ms": "DOUBLE",
         "created_at": "TIMESTAMP", "completed_at": "TIMESTAMP",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("Skill", {
         "id": "STRING", "name": "STRING", "description": "STRING",
         "path": "STRING",
         "url": "STRING", "action_sequence": "STRING",
         "extracted_data_template": "STRING", "domain": "STRING",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
     NodeType("ExecutionTree", {
         "id": "STRING", "root_task_id": "STRING",
         "total_nodes": "INT64", "total_tokens": "INT64",
         "total_latency_ms": "DOUBLE", "created_at": "TIMESTAMP",
+        "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),
 ]
 
