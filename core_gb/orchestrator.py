@@ -15,6 +15,7 @@ from core_gb.patterns import PatternMatcher, PatternStore
 from core_gb.safety import IntentClassifier
 from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode, TaskStatus
 from core_gb.verification import VerificationConfig
+from core_gb.wave_event import WaveCompleteEvent
 from graph.resolver import EntityResolver
 from graph.store import GraphStore
 from graph.updater import GraphUpdater
@@ -37,10 +38,12 @@ class Orchestrator:
         store: GraphStore,
         router: ModelRouter,
         verification_config: VerificationConfig | None = None,
+        enable_replan: bool = False,
     ) -> None:
         self._store = store
         self._router = router
         self._verification_config = verification_config or VerificationConfig()
+        self._enable_replan = enable_replan
         self._intake = IntakeParser()
         self._tool_registry = ToolRegistry(workspace=str(Path.cwd()), router=router)
         self._executor = SimpleExecutor(store, router, tool_registry=self._tool_registry)
@@ -56,6 +59,9 @@ class Orchestrator:
         self._pattern_matcher = PatternMatcher()
         self._graph_updater = GraphUpdater(store)
         self._intent_classifier = IntentClassifier()
+
+        if self._enable_replan:
+            self._dag_executor.set_replan_callback(self._replan_callback)
 
     async def process(self, message: str) -> ExecutionResult:
         """Process a user message end-to-end.
@@ -182,6 +188,59 @@ class Orchestrator:
         """Execute a single leaf node via SimpleExecutor."""
         task_text = leaf.description or original_message
         return await self._executor.execute(task_text, leaf.complexity)
+
+    async def _replan_callback(
+        self, event: WaveCompleteEvent
+    ) -> list[TaskNode] | None:
+        """Re-plan remaining nodes using accumulated results as context.
+
+        Called by DAGExecutor after each wave when enable_replan is True.
+        Passes accumulated results to the Decomposer to produce a revised
+        plan for the remaining work. Returns None if re-planning is not
+        applicable (e.g. no remaining nodes, or first wave has not
+        produced meaningful context yet).
+
+        Args:
+            event: The WaveCompleteEvent with completed and remaining info.
+
+        Returns:
+            A list of replacement TaskNode instances, or None to skip
+            re-planning for this wave.
+        """
+        if not event.remaining_nodes:
+            return None
+
+        # Build a context summary from accumulated results
+        result_summaries: list[str] = []
+        for node_id, output in event.accumulated_results.items():
+            result_summaries.append(f"[{node_id}]: {output}")
+
+        context_str = "\n".join(result_summaries)
+        remaining_desc = ", ".join(event.remaining_nodes)
+
+        replan_prompt = (
+            f"[Re-plan with intermediate results]\n"
+            f"Completed results so far:\n{context_str}\n\n"
+            f"Remaining tasks to re-plan: {remaining_desc}\n"
+            f"Produce a revised plan for the remaining work, "
+            f"taking the completed results into account."
+        )
+
+        try:
+            revised_nodes = await self._decomposer.decompose(replan_prompt)
+            if revised_nodes:
+                logger.info(
+                    "Re-planned %d remaining nodes into %d new nodes "
+                    "after wave %d",
+                    len(event.remaining_nodes),
+                    len(revised_nodes),
+                    event.wave_index,
+                )
+                return revised_nodes
+        except Exception as exc:
+            logger.warning("Re-planning failed: %s", exc)
+
+        return None
 
     def _instantiate_pattern(
         self, pattern: Pattern, bindings: dict[str, str]

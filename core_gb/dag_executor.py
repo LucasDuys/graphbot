@@ -8,7 +8,7 @@ import logging
 import time
 import uuid
 from graphlib import TopologicalSorter
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 if TYPE_CHECKING:
     from core_gb.decomposer import Decomposer
@@ -73,6 +73,27 @@ class DAGExecutor:
         self._decomposer: Decomposer | None = None
         self._max_expansion_depth: int = max_expansion_depth
         self.aggregation_template: dict | None = None
+        self._on_replan: (
+            Callable[[WaveCompleteEvent], Awaitable[list[TaskNode] | None]] | None
+        ) = None
+
+    def set_replan_callback(
+        self,
+        callback: Callable[[WaveCompleteEvent], Awaitable[list[TaskNode] | None]],
+    ) -> None:
+        """Register an async callback for intermediate result re-planning.
+
+        After each wave completes, this callback is invoked with the
+        WaveCompleteEvent. If it returns a non-None list of TaskNode
+        instances, those replace all remaining unexecuted nodes in the
+        DAG. Completed results are preserved.
+
+        Args:
+            callback: Async function that receives a WaveCompleteEvent and
+                returns either None (no re-planning) or a list of TaskNode
+                instances to replace the remaining execution plan.
+        """
+        self._on_replan = callback
 
     async def execute(
         self,
@@ -414,6 +435,80 @@ class DAGExecutor:
                     logger.warning(
                         "on_wave_complete callback raised: %s", exc,
                     )
+
+            # --- Async re-planning callback ---
+            # If an on_replan callback is registered and there are remaining
+            # nodes, invoke it. When it returns replacement nodes, drain the
+            # remaining entries from the sorter, execute the replacement
+            # sub-DAG, and merge results.
+            replan_nodes: list[TaskNode] | None = None
+            if self._on_replan is not None and remaining:
+                try:
+                    replan_nodes = await self._on_replan(event)
+                except Exception as exc:
+                    logger.warning(
+                        "on_replan callback raised: %s", exc,
+                    )
+
+            if replan_nodes is not None and len(replan_nodes) > 0:
+                logger.info(
+                    "Re-planning after wave %d: replacing %d remaining "
+                    "nodes with %d new nodes",
+                    wave_index,
+                    len(remaining),
+                    len(replan_nodes),
+                )
+                # Drain all remaining nodes from the sorter so it can
+                # finish cleanly. Mark them done without executing.
+                while sorter.is_active():
+                    drain_ready = sorter.get_ready()
+                    for drain_id in drain_ready:
+                        sorter.done(drain_id)
+
+                # Execute the replacement sub-DAG, forwarding current
+                # data_registry context into new nodes.
+                replan_result = await self.execute(
+                    replan_nodes,
+                    _expansion_depth=expansion_depth,
+                    _expansion_count=expansion_count,
+                )
+
+                # Merge replan results with completed results. Build a
+                # combined dispatch list for aggregation that includes
+                # both already-completed nodes and the replan output.
+                replan_dispatch = [
+                    n for n in replan_nodes if n.is_atomic
+                ]
+                all_completed_nodes = [
+                    n for n in dispatch_nodes
+                    if n.id in results
+                    and n.id not in skipped_ids
+                    and n.id not in loop_registry
+                ]
+                combined_leaves = all_completed_nodes + replan_dispatch
+
+                # Create a synthetic result entry for the replan sub-DAG
+                # keyed by a unique ID so the aggregator includes it.
+                replan_id = f"_replan_{wave_index}"
+                results[replan_id] = replan_result
+                replan_node = TaskNode(
+                    id=replan_id,
+                    description="Re-planned execution",
+                    is_atomic=True,
+                    status=TaskStatus.COMPLETED,
+                )
+                node_by_id[replan_id] = replan_node
+                combined_leaves.append(replan_node)
+
+                result = self._aggregate_results(
+                    root_id,
+                    combined_leaves,
+                    results,
+                    node_by_id,
+                    start,
+                )
+                return result
+
             wave_index += 1
 
         # Filter skipped nodes out of the dispatch list for aggregation
