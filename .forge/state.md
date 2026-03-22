@@ -1,9 +1,9 @@
 ---
 phase: in_progress
 spec: phase4-patterns
-current_task: T077
+current_task: T091
 task_status: complete
-iteration: 27
+iteration: 29
 tokens_used: 100000
 tokens_budget: 200000
 depth: standard
@@ -52,6 +52,9 @@ handoff_requested: false
 
 - T067-T069: Real-world tool task suite + runner + tests (10 tasks, committed 89364f6)
 - T072-T074: Domain override + improved decomposition prompt + executor tool awareness (12 tests, committed f8628c6)
+
+- T088/T089: Structured tool params + smart decomposition (15 tests, committed 8cd231f)
+- T090/T091: Tool failure retry + CodeEditAgent (12 tests, committed 398a6ab)
 
 ## In-Flight Work
 None.
