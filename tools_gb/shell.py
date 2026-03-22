@@ -28,6 +28,36 @@ SECRET_PATTERNS = [
 ]
 
 
+def _parse_list_env(env_var: str) -> list[str]:
+    """Parse a comma-separated environment variable into a list of trimmed strings.
+
+    Returns an empty list if the variable is not set or empty.
+    """
+    raw = os.environ.get(env_var, "").strip()
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _extract_base_command(command: str) -> str:
+    """Extract the base command name from a shell command string.
+
+    Handles leading whitespace, environment variable assignments, and
+    paths (e.g., /usr/bin/python -> python).
+
+    Returns:
+        The base command name in lowercase.
+    """
+    # Strip leading env assignments like VAR=value cmd
+    parts = command.strip().split()
+    for part in parts:
+        if "=" in part and not part.startswith("-"):
+            continue
+        # Strip path: /usr/bin/python -> python
+        return part.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    return ""
+
+
 class ShellTool:
     """Sandboxed shell execution for DAG leaf tasks."""
 
@@ -109,10 +139,43 @@ class ShellTool:
             }
 
     def _check_blocked(self, command: str) -> str | None:
-        """Check if command matches any blocked patterns. Returns reason or None."""
+        """Check if command is blocked by patterns, blocklist, or allowlist.
+
+        Evaluation order:
+        1. Built-in BLOCKED_PATTERNS (always checked first)
+        2. SHELL_BLOCKLIST from environment (custom blocklist)
+        3. SHELL_ALLOWLIST from environment (if set, only listed commands run)
+
+        Returns reason string if blocked, None if permitted.
+        """
+        # 1. Built-in dangerous pattern check
         for pattern in BLOCKED_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
                 return f"Matches blocked pattern: {pattern}"
+
+        base_cmd = _extract_base_command(command)
+
+        # 2. Environment blocklist check
+        blocklist = _parse_list_env("SHELL_BLOCKLIST")
+        if blocklist:
+            for blocked_cmd in blocklist:
+                if blocked_cmd.lower() == base_cmd:
+                    return (
+                        f"Blocked by SHELL_BLOCKLIST: "
+                        f"'{blocked_cmd}' is not permitted"
+                    )
+
+        # 3. Environment allowlist check
+        allowlist = _parse_list_env("SHELL_ALLOWLIST")
+        if allowlist:
+            allowed_lower = [a.lower() for a in allowlist]
+            if base_cmd not in allowed_lower:
+                return (
+                    f"Not on SHELL_ALLOWLIST: '{base_cmd}' "
+                    f"is not in allowed commands "
+                    f"({', '.join(allowlist)})"
+                )
+
         return None
 
     def _safe_env(self) -> dict[str, str]:

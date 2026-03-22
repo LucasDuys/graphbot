@@ -2,6 +2,7 @@
 
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -157,3 +158,141 @@ class TestInterpretOutput:
         assert "2 commits" in answer
         assert "first commit" in answer
         assert "second commit" in answer
+
+
+# ---------------------------------------------------------------------------
+# Shell allowlist / blocklist from environment
+# ---------------------------------------------------------------------------
+
+
+class TestShellAllowlist:
+    """SHELL_ALLOWLIST env var restricts execution to only listed commands."""
+
+    @pytest.mark.asyncio
+    async def test_allowlist_permits_listed_command(self, tmp_path) -> None:
+        """Commands on the allowlist are permitted."""
+        with patch.dict(os.environ, {"SHELL_ALLOWLIST": "echo,ls,python"}, clear=False):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("echo hello")
+            assert result["success"] is True
+            assert "hello" in result["stdout"]
+
+    @pytest.mark.asyncio
+    async def test_allowlist_blocks_unlisted_command(self, tmp_path) -> None:
+        """Commands not on the allowlist are blocked."""
+        with patch.dict(os.environ, {"SHELL_ALLOWLIST": "echo,ls"}, clear=False):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("python -c \"print('hi')\"")
+            assert result["success"] is False
+            assert result["exit_code"] == -1
+            assert "allowlist" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_allowlist_empty_means_unrestricted(self, tmp_path) -> None:
+        """Empty SHELL_ALLOWLIST means no allowlist restriction."""
+        with patch.dict(os.environ, {"SHELL_ALLOWLIST": ""}, clear=False):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("echo allowed")
+            assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_allowlist_not_set_means_unrestricted(self, tmp_path) -> None:
+        """Absent SHELL_ALLOWLIST means no allowlist restriction."""
+        env = os.environ.copy()
+        env.pop("SHELL_ALLOWLIST", None)
+        env.pop("SHELL_BLOCKLIST", None)
+        with patch.dict(os.environ, env, clear=True):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("echo allowed")
+            assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_allowlist_whitespace_handling(self, tmp_path) -> None:
+        """Allowlist entries are trimmed of whitespace."""
+        with patch.dict(
+            os.environ, {"SHELL_ALLOWLIST": " echo , ls , python "}, clear=False
+        ):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("echo trimmed")
+            assert result["success"] is True
+
+
+class TestShellBlocklist:
+    """SHELL_BLOCKLIST env var blocks specific commands on top of built-in patterns."""
+
+    @pytest.mark.asyncio
+    async def test_blocklist_blocks_listed_command(self, tmp_path) -> None:
+        """Commands on the blocklist are blocked."""
+        with patch.dict(os.environ, {"SHELL_BLOCKLIST": "curl,wget,nc"}, clear=False):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("curl http://example.com")
+            assert result["success"] is False
+            assert result["exit_code"] == -1
+            assert "blocklist" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_blocklist_permits_unlisted_command(self, tmp_path) -> None:
+        """Commands not on the blocklist are permitted."""
+        with patch.dict(os.environ, {"SHELL_BLOCKLIST": "curl,wget"}, clear=False):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("echo hello")
+            assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_blocklist_empty_means_no_extra_blocks(self, tmp_path) -> None:
+        """Empty SHELL_BLOCKLIST adds no extra blocks (built-in patterns still apply)."""
+        with patch.dict(os.environ, {"SHELL_BLOCKLIST": ""}, clear=False):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("echo allowed")
+            assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_blocklist_plus_builtin_patterns(self, tmp_path) -> None:
+        """Built-in BLOCKED_PATTERNS still apply even with custom blocklist."""
+        with patch.dict(os.environ, {"SHELL_BLOCKLIST": "nc"}, clear=False):
+            tool = ShellTool(workspace=str(tmp_path))
+            # Built-in pattern: rm -rf /
+            result = await tool.run("rm -rf /")
+            assert result["success"] is False
+            assert result["exit_code"] == -1
+
+    @pytest.mark.asyncio
+    async def test_blocklist_whitespace_handling(self, tmp_path) -> None:
+        """Blocklist entries are trimmed of whitespace."""
+        with patch.dict(
+            os.environ, {"SHELL_BLOCKLIST": " curl , wget , nc "}, clear=False
+        ):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("wget http://example.com/file")
+            assert result["success"] is False
+            assert "blocklist" in result["error"].lower()
+
+
+class TestShellAllowlistBlocklistCombined:
+    """When both SHELL_ALLOWLIST and SHELL_BLOCKLIST are set."""
+
+    @pytest.mark.asyncio
+    async def test_allowlist_and_blocklist_together(self, tmp_path) -> None:
+        """Blocklist takes precedence: even if on allowlist, blocklist blocks."""
+        with patch.dict(
+            os.environ,
+            {"SHELL_ALLOWLIST": "echo,curl", "SHELL_BLOCKLIST": "curl"},
+            clear=False,
+        ):
+            tool = ShellTool(workspace=str(tmp_path))
+            # curl is on both lists -- blocklist wins
+            result = await tool.run("curl http://example.com")
+            assert result["success"] is False
+            assert "blocklist" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_allowlist_and_blocklist_permitted(self, tmp_path) -> None:
+        """Command on allowlist and not on blocklist is permitted."""
+        with patch.dict(
+            os.environ,
+            {"SHELL_ALLOWLIST": "echo,ls", "SHELL_BLOCKLIST": "curl"},
+            clear=False,
+        ):
+            tool = ShellTool(workspace=str(tmp_path))
+            result = await tool.run("echo safe")
+            assert result["success"] is True
