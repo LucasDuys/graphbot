@@ -33,12 +33,14 @@ const DOMAIN_LABELS: Record<string, string> = {
 export const TaskNode = memo(function TaskNode({ data }: NodeProps) {
   const d = data as TaskNodeData;
   const colors = STATUS_COLORS[d.status] || STATUS_COLORS.pending;
+  const nodeClass = `node-${d.status}`;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
+      className={nodeClass}
       style={{
         background: colors.bg,
         borderLeft: `3px solid ${colors.border}`,
@@ -51,7 +53,7 @@ export const TaskNode = memo(function TaskNode({ data }: NodeProps) {
         maxWidth: 260,
         boxShadow: d.status === "running" ? "var(--shadow-md)" : "var(--shadow-sm)",
         fontFamily: "var(--font-sans)",
-        transition: "box-shadow var(--transition-default), border-color var(--transition-default)",
+        transition: "box-shadow var(--transition-default), border-color var(--transition-default), background var(--transition-default)",
       }}
     >
       <Handle type="target" position={Position.Top} style={{ background: "var(--gray-6)", width: 6, height: 6 }} />
@@ -72,6 +74,16 @@ export const TaskNode = memo(function TaskNode({ data }: NodeProps) {
         }}>
           {d.label}
         </span>
+        {/* Status indicator dot */}
+        <span style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: colors.border,
+          flexShrink: 0,
+          marginLeft: "var(--space-2)",
+          marginTop: 2,
+        }} />
       </div>
 
       {/* Footer: domain badge + metrics */}

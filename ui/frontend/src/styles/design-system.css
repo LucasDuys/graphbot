@@ -165,3 +165,69 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--gray-6); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gray-7); }
+
+/* ===== NODE ANIMATIONS ===== */
+@keyframes node-pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 161, 0, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(229, 161, 0, 0); }
+}
+
+@keyframes node-fade-green {
+  from { border-left-color: var(--status-running); }
+  to { border-left-color: var(--status-success); }
+}
+
+.node-pending {
+  opacity: 0.7;
+}
+
+.node-running {
+  animation: node-pulse-amber 1.8s ease-in-out infinite;
+}
+
+.node-completed {
+  animation: node-fade-green 0.4s ease-out forwards;
+}
+
+/* ===== EDGE ANIMATIONS ===== */
+@keyframes edge-flow {
+  from { stroke-dashoffset: 20; }
+  to { stroke-dashoffset: 0; }
+}
+
+.react-flow__edge-path[data-flowing="true"] {
+  stroke-dasharray: 6 4;
+  animation: edge-flow 0.6s linear infinite;
+}
+
+/* ===== EMPTY STATE ===== */
+@keyframes empty-state-fade {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.empty-state-pulse {
+  animation: empty-state-fade 3s ease-in-out infinite;
+}
+
+/* ===== DARK MODE TOGGLE ===== */
+.dark-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--gray-1);
+  color: var(--gray-9);
+  cursor: pointer;
+  transition: background var(--transition-default), color var(--transition-default);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.dark-mode-toggle:hover {
+  background: var(--gray-3);
+  color: var(--gray-11);
+}

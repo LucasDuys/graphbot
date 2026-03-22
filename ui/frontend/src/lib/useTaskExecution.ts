@@ -2,19 +2,21 @@
 
 import { useCallback } from "react";
 import { useSetAtom } from "jotai";
-import { dagNodesAtom, dagEdgesAtom, taskStateAtom } from "./store";
-import type { DagNodeData } from "./store";
+import { dagNodesAtom, dagEdgesAtom, taskStateAtom, executionStartAtom } from "./store";
+import type { DagNodeData, DagEdgeData } from "./store";
 import { submitTask, streamEvents } from "./api";
 
 export function useTaskExecution() {
   const setNodes = useSetAtom(dagNodesAtom);
   const setEdges = useSetAtom(dagEdgesAtom);
   const setTaskState = useSetAtom(taskStateAtom);
+  const setExecutionStart = useSetAtom(executionStartAtom);
 
   const execute = useCallback(async (message: string) => {
     // Reset state
     setNodes([]);
     setEdges([]);
+    setExecutionStart(Date.now());
     setTaskState({
       task_id: null,
       message,
@@ -76,13 +78,24 @@ export function useTaskExecution() {
               break;
 
             case "edge.created":
-              setEdges((prev) => [
+              setEdges((prev: DagEdgeData[]) => [
                 ...prev,
-                { source: payload.source, target: payload.target, label: payload.label },
+                { source: payload.source, target: payload.target, label: payload.label, flowing: false },
               ]);
               break;
 
+            case "data.flow":
+              setEdges((prev: DagEdgeData[]) =>
+                prev.map((e: DagEdgeData) =>
+                  e.source === payload.source && e.target === payload.target
+                    ? { ...e, flowing: true }
+                    : e,
+                ),
+              );
+              break;
+
             case "task.complete":
+              setExecutionStart(null);
               setTaskState((prev) => ({
                 ...prev,
                 phase: "complete",
@@ -91,6 +104,7 @@ export function useTaskExecution() {
               break;
 
             case "task.error":
+              setExecutionStart(null);
               setTaskState((prev) => ({
                 ...prev,
                 phase: "error",
@@ -117,7 +131,7 @@ export function useTaskExecution() {
         error: message,
       }));
     }
-  }, [setNodes, setEdges, setTaskState]);
+  }, [setNodes, setEdges, setTaskState, setExecutionStart]);
 
   return { execute };
 }

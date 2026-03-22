@@ -1,15 +1,51 @@
 "use client";
 
-import { useState, useCallback, KeyboardEvent } from "react";
+import { useState, useCallback, useEffect, useRef, KeyboardEvent } from "react";
 import { useAtomValue } from "jotai";
-import { taskStateAtom } from "@/lib/store";
+import { taskStateAtom, executionStartAtom } from "@/lib/store";
 import { useTaskExecution } from "@/lib/useTaskExecution";
+
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (minutes > 0) {
+    return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  }
+  return `${secs}s`;
+}
 
 export function TaskInput() {
   const [input, setInput] = useState("");
   const taskState = useAtomValue(taskStateAtom);
+  const executionStart = useAtomValue(executionStartAtom);
   const { execute } = useTaskExecution();
   const isProcessing = !["idle", "complete", "error"].includes(taskState.phase);
+
+  // Elapsed timer
+  const [elapsed, setElapsed] = useState<number>(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (executionStart !== null) {
+      setElapsed(Date.now() - executionStart);
+      timerRef.current = setInterval(() => {
+        setElapsed(Date.now() - executionStart);
+      }, 100);
+    } else {
+      setElapsed(0);
+      if (timerRef.current !== null) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+    return () => {
+      if (timerRef.current !== null) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [executionStart]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = input.trim();
@@ -58,6 +94,18 @@ export function TaskInput() {
             e.target.style.boxShadow = "none";
           }}
         />
+        {isProcessing && executionStart !== null && (
+          <span style={{
+            fontSize: "var(--text-sm)",
+            fontFamily: "var(--font-mono)",
+            color: "var(--status-running)",
+            fontWeight: 600,
+            minWidth: 40,
+            textAlign: "right",
+          }}>
+            {formatElapsed(elapsed)}
+          </span>
+        )}
         <button
           onClick={handleSubmit}
           disabled={isProcessing || !input.trim()}
