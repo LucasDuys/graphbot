@@ -183,13 +183,13 @@ Rules:
 4. Use depends_on for sequential dependencies between sibling nodes
 5. Use provides/consumes for typed data flow between nodes
 6. Task types: RETRIEVE (fetch data), WRITE (produce text), THINK (reason/analyze), CODE (write/fix code)
-7. Domains -- CRITICAL: choose the right domain so the correct tool is used:
-   - "web": for ANY task that needs internet access (searching, fetching URLs, finding information online). Use task_type RETRIEVE.
-   - "file": for ANY task that reads, lists, or searches local files. Use task_type RETRIEVE.
-   - "code": for ANY task that runs shell commands (git log, pytest, echo, etc.). Use task_type CODE.
-   - "system": for math, logic, knowledge questions that need LLM reasoning. Use task_type THINK.
-   - "synthesis": for combining/summarizing results from other nodes. Use task_type WRITE.
-   If a task involves reading a file, the domain MUST be "file". If it involves web search, the domain MUST be "web". If it involves running a command, the domain MUST be "code".
+7. Domains -- CRITICAL: each domain maps to specific tools. Choose based on what tools the task needs:
+   - "file": Has tools file_read, file_list, file_search. Use for ANY task involving local files, directories, or file content.
+   - "web": Has tools web_search, web_fetch. Use for ANY task needing internet, searching online, or fetching URLs.
+   - "code": Has tool shell_run. Use for ANY task running commands (git, pytest, pip, echo, etc).
+   - "system": No tools. Use ONLY for pure reasoning, math, logic, knowledge questions.
+   - "synthesis": No tools. Use ONLY for combining/summarizing results from other nodes.
+   RULE: If a task mentions files -> "file". If it mentions search/web/online -> "web". If it mentions running commands -> "code". NEVER use "system" for tasks that need tools.
 8. Maximum 3 levels deep, maximum 5 children per node
 9. Include an "output_template" with:
    - "aggregation_type": how to combine results ("concatenate" for lists, "template_fill" for structured, "merge_json" for data)
@@ -238,6 +238,11 @@ Task: "Compare X and Y"
 {{"id":"root","description":"Compare X and Y","domain":"synthesis","task_type":"THINK","complexity":2,"depends_on":[],"provides":[],"consumes":[],"is_atomic":true,"children":["a"]}}
 ]}}
 WHY THIS IS WRONG: root has is_atomic: true but also has children. Atomic nodes must have children: []. Also child "a" is referenced but not defined in nodes.
+
+BAD Example (Wrong Domain - Shell Task):
+Task: "Run git log --oneline -10"
+{{"nodes":[{{"id":"root","description":"Run git log","domain":"system","task_type":"THINK","complexity":1,"depends_on":[],"provides":[],"consumes":[],"is_atomic":true,"children":[]}}]}}
+WHY WRONG: Running git requires shell_run tool. Domain MUST be "code", not "system".
 </examples>"""
 
     _USER_TEMPLATE = """Task: {task}
@@ -419,6 +424,45 @@ from models.router import ModelRouter
 logger = logging.getLogger(__name__)
 
 
+def infer_domain_from_description(description: str) -> Domain | None:
+    """Infer correct domain from task description keywords.
+    Returns None if no strong signal detected (keep original domain).
+    """
+    text = description.lower()
+
+    # File signals (strongest match first)
+    file_keywords = [
+        "read ", "read_file", "file_read", "open file",
+        "list files", "list directory", "file_list", "list all",
+        "search files", "file_search", "grep", "find in file",
+        ".py", ".md", ".json", ".toml", ".txt", ".yaml", ".csv",
+        "readme", "pyproject", "directory", "folder",
+    ]
+    if any(kw in text for kw in file_keywords):
+        return Domain.FILE
+
+    # Web signals
+    web_keywords = [
+        "search the web", "web search", "web_search", "search online",
+        "fetch url", "web_fetch", "http://", "https://",
+        "browse", "scrape", "find online", "look up online",
+        "search for", "search github", "search google",
+    ]
+    if any(kw in text for kw in web_keywords):
+        return Domain.WEB
+
+    # Code/shell signals
+    code_keywords = [
+        "run ", "run the", "execute ", "shell_run",
+        "git log", "git ", "pytest", "pip ", "npm ",
+        "command", "terminal", "bash", "shell",
+    ]
+    if any(kw in text for kw in code_keywords):
+        return Domain.CODE
+
+    return None
+
+
 class Decomposer:
     """Recursive task decomposer using constrained JSON output from LLMs."""
 
@@ -460,7 +504,9 @@ class Decomposer:
             if result is not None:
                 nodes, template = result
                 self.last_template = template
-                return self._to_task_nodes(nodes)
+                task_nodes = self._to_task_nodes(nodes)
+                self._apply_domain_overrides(task_nodes)
+                return task_nodes
         except Exception as exc:
             logger.warning("Decomposition first attempt failed: %s", exc)
 
@@ -479,7 +525,9 @@ class Decomposer:
                         tree_errors = validate_tree(fixed_nodes)
                         if not errors and not tree_errors:
                             self.last_template = repaired.get("output_template")
-                            return self._to_task_nodes(fixed_nodes)
+                            task_nodes = self._to_task_nodes(fixed_nodes)
+                            self._apply_domain_overrides(task_nodes)
+                            return task_nodes
                 logger.warning("json_repair on first response failed validation")
             except Exception as exc:
                 logger.warning("json_repair on first response failed: %s", exc)
@@ -494,13 +542,28 @@ class Decomposer:
             if result is not None:
                 nodes, template = result
                 self.last_template = template
-                return self._to_task_nodes(nodes)
+                task_nodes = self._to_task_nodes(nodes)
+                self._apply_domain_overrides(task_nodes)
+                return task_nodes
         except Exception as exc:
             logger.warning("Decomposition second attempt failed: %s", exc)
 
         # Fallback: single atomic node
         logger.info("Falling back to single atomic node for: %s", task[:80])
         return self._fallback_single_node(task)
+
+    @staticmethod
+    def _apply_domain_overrides(task_nodes: list[TaskNode]) -> None:
+        """Post-process: override domains based on description keywords."""
+        for node in task_nodes:
+            if node.is_atomic:
+                inferred = infer_domain_from_description(node.description)
+                if inferred is not None and node.domain != inferred:
+                    logger.info(
+                        "Domain override: %s -> %s for '%s'",
+                        node.domain.value, inferred.value, node.description[:50],
+                    )
+                    node.domain = inferred
 
     def _parse_and_validate(
         self, content: str, max_depth: int

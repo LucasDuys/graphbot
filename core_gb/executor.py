@@ -20,10 +20,11 @@ class SimpleExecutor:
     This is the Phase 1 proof of concept; the full DAG executor comes in Phase 3.
     """
 
-    def __init__(self, store: GraphStore, router: ModelRouter) -> None:
+    def __init__(self, store: GraphStore, router: ModelRouter, tool_registry: object | None = None) -> None:
         self._store = store
         self._router = router
         self._resolver = EntityResolver(store)
+        self._tool_registry = tool_registry
 
     async def execute(
         self, task: str, complexity: int = 1, provides_keys: list[str] | None = None,
@@ -40,6 +41,31 @@ class SimpleExecutor:
         """
         start = time.perf_counter()
         root_id = str(uuid.uuid4())
+
+        # Check if task should use a tool directly (skip if task contains
+        # forwarded data from DAG execution -- DAGExecutor handles tool routing)
+        if self._tool_registry and "<forwarded_data>" not in task:
+            from core_gb.decomposer import infer_domain_from_description
+            inferred_domain = infer_domain_from_description(task)
+            if inferred_domain and self._tool_registry.has_tool(inferred_domain):
+                from core_gb.types import TaskNode as TN, TaskStatus as TS
+                tool_node = TN(
+                    id=root_id, description=task,
+                    is_atomic=True, domain=inferred_domain, status=TS.READY,
+                )
+                result = await self._tool_registry.execute(tool_node)
+                elapsed = (time.perf_counter() - start) * 1000
+                return ExecutionResult(
+                    root_id=root_id,
+                    output=result.output,
+                    success=result.success,
+                    total_nodes=1,
+                    total_tokens=0,
+                    total_latency_ms=elapsed,
+                    total_cost=0.0,
+                    model_used=result.model_used,
+                    errors=result.errors,
+                )
 
         # Step 1: Extract entity mentions (simple word extraction)
         words = self._extract_mentions(task)

@@ -35,8 +35,8 @@ class Orchestrator:
         self._store = store
         self._router = router
         self._intake = IntakeParser()
-        self._executor = SimpleExecutor(store, router)
         self._tool_registry = ToolRegistry(workspace=str(Path.cwd()))
+        self._executor = SimpleExecutor(store, router, tool_registry=self._tool_registry)
         self._dag_executor = DAGExecutor(self._executor, tool_registry=self._tool_registry)
         self._decomposer = Decomposer(router)
         self._resolver = EntityResolver(store)
