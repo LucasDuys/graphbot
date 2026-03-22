@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-
 from pathlib import Path
 
 from core_gb.dag_executor import DAGExecutor
@@ -13,6 +12,7 @@ from core_gb.decomposer import Decomposer
 from core_gb.executor import SimpleExecutor
 from core_gb.intake import IntakeParser, TaskType
 from core_gb.patterns import PatternMatcher, PatternStore
+from core_gb.safety import IntentClassifier
 from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode, TaskStatus
 from graph.resolver import EntityResolver
 from graph.store import GraphStore
@@ -43,6 +43,7 @@ class Orchestrator:
         self._pattern_store = PatternStore(store)
         self._pattern_matcher = PatternMatcher()
         self._graph_updater = GraphUpdater(store)
+        self._intent_classifier = IntentClassifier()
 
     async def process(self, message: str) -> ExecutionResult:
         """Process a user message end-to-end.
@@ -68,6 +69,11 @@ class Orchestrator:
                 pattern, bindings = match_result
                 nodes = self._instantiate_pattern(pattern, bindings)
                 if nodes:
+                    # Safety check on pattern-instantiated DAG
+                    verdict = self._intent_classifier.classify_dag(nodes)
+                    if verdict.blocked:
+                        return self._blocked_result(message, verdict.reason)
+
                     self._pattern_store.increment_usage(pattern.id)
                     logger.info("Pattern cache hit: %s", pattern.trigger[:60])
                     leaves = [n for n in nodes if n.is_atomic]
@@ -122,6 +128,11 @@ class Orchestrator:
 
         nodes = await self._decomposer.decompose(message, context)
 
+        # Safety check on decomposed DAG before execution
+        verdict = self._intent_classifier.classify_dag(nodes)
+        if verdict.blocked:
+            return self._blocked_result(message, verdict.reason)
+
         # Filter to atomic (leaf) nodes only
         leaves = [n for n in nodes if n.is_atomic]
 
@@ -141,6 +152,17 @@ class Orchestrator:
         result = await self._dag_executor.execute(nodes)
         self._graph_updater.update(message, nodes, result)
         return result
+
+    @staticmethod
+    def _blocked_result(message: str, reason: str) -> ExecutionResult:
+        """Return an error ExecutionResult when the DAG is blocked by safety checks."""
+        logger.warning("DAG execution blocked: %s", reason)
+        return ExecutionResult(
+            root_id="blocked",
+            output=f"Request blocked by safety classifier: {reason}",
+            success=False,
+            errors=(reason,),
+        )
 
     async def _execute_single_leaf(
         self, leaf: TaskNode, original_message: str
