@@ -16,6 +16,22 @@ from graph.store import GraphStore
 class PatternMatcher:
     """Matches incoming tasks against cached patterns using trigger templates."""
 
+    @staticmethod
+    def _success_rate_factor(pattern: Pattern) -> float:
+        """Compute a weighting factor based on the pattern's success rate.
+
+        Returns a value in (0.0, 1.0]:
+        - 1.0 if the pattern has never been used (no history to penalize)
+        - success_count / total_uses otherwise
+
+        This ensures patterns with high failure rates are penalized in scoring
+        while brand-new patterns receive no penalty.
+        """
+        total = pattern.success_count + pattern.failure_count
+        if total == 0:
+            return 1.0
+        return pattern.success_count / total
+
     def match(
         self, task: str, patterns: list[Pattern], threshold: float = 0.7
     ) -> tuple[Pattern, dict[str, str]] | None:
@@ -28,16 +44,18 @@ class PatternMatcher:
         1. For each pattern, try to match the trigger template against the task
         2. Extract variable bindings from slots ({slot_0}, {slot_1}, etc.)
         3. Compute similarity between the structural parts
-        4. Return best match above threshold
+        4. Weight the raw score by the pattern's success rate factor
+        5. Return best match above threshold
         """
         best_match: Pattern | None = None
         best_score = 0.0
         best_bindings: dict[str, str] = {}
 
         for pattern in patterns:
-            score, bindings = self._score_match(task, pattern)
-            if score >= threshold and score > best_score:
-                best_score = score
+            raw_score, bindings = self._score_match(task, pattern)
+            weighted_score = raw_score * self._success_rate_factor(pattern)
+            if weighted_score >= threshold and weighted_score > best_score:
+                best_score = weighted_score
                 best_match = pattern
                 best_bindings = bindings
 
@@ -208,6 +226,7 @@ class PatternStore:
             "description": pattern.description,
             "variable_slots": json.dumps(list(pattern.variable_slots)),
             "success_count": pattern.success_count,
+            "failure_count": pattern.failure_count,
             "avg_tokens": pattern.avg_tokens,
             "avg_latency_ms": pattern.avg_latency_ms,
             "tree_template": pattern.tree_template,
@@ -227,7 +246,8 @@ class PatternStore:
                 description=str(row.get("p.description", "")),
                 variable_slots=tuple(json.loads(row.get("p.variable_slots", "[]"))),
                 tree_template=str(row.get("p.tree_template", "")),
-                success_count=int(row.get("p.success_count", 0)),
+                success_count=int(row.get("p.success_count") or 0),
+                failure_count=int(row.get("p.failure_count") or 0),
                 avg_tokens=float(row.get("p.avg_tokens", 0.0)),
                 avg_latency_ms=float(row.get("p.avg_latency_ms", 0.0)),
             ))
@@ -241,5 +261,16 @@ class PatternStore:
         current_count = int(node.get("success_count", 0))
         self._store.update_node("PatternNode", pattern_id, {
             "success_count": current_count + 1,
+            "last_used": datetime.now(),
+        })
+
+    def increment_failure(self, pattern_id: str) -> None:
+        """Increment failure count and update last_used timestamp."""
+        node = self._store.get_node("PatternNode", pattern_id)
+        if node is None:
+            return
+        current_count = int(node.get("failure_count", 0))
+        self._store.update_node("PatternNode", pattern_id, {
+            "failure_count": current_count + 1,
             "last_used": datetime.now(),
         })
