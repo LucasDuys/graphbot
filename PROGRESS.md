@@ -1,8 +1,8 @@
 # GraphBot Progress
 
 ## Current Phase
-**Phase 15: Foundation for Autonomy -- COMPLETE**
-All phases through 15 complete. System now learns from failures, has safety guards, model cascade, and semantic caching.
+**Phase 20: Persistent Goals and Safety Hardening -- COMPLETE**
+All 20 phases complete. GraphBot is a full autonomous agent framework with verification, dynamic execution, browser automation, memory intelligence, persistent goals, and constitutional safety.
 
 ## Completed
 - [x] Full architecture design (2026-03-20)
@@ -141,8 +141,30 @@ All phases through 15 complete. System now learns from failures, has safety guar
 - **Key capabilities: learns from failures, safety guards, model cascade, semantic caching**
 - **Total: 792 tests, all passing**
 
+## Phase 16 Completed (2026-03-22)
+- [x] T137-T142: 3-layer verification (format/type, self-consistency, CRITIC KG verification)
+- [x] Configurable per-node verification levels, result logging, integration tests
+- **Total: 905 tests**
+
+## Phase 17 Completed (2026-03-22)
+- [x] T143-T150: Dynamic execution (expandable nodes, conditional/loop control flow, re-decomposition on failure, wave events, intermediate re-planning)
+- **Total: ~950 tests**
+
+## Phase 18 Completed (2026-03-22)
+- [x] T151-T158: Browser tool (Playwright), policy guards, session caching, planner-grounder pattern, dynamic tool creation via LLM, tool quality tracking, tool persistence
+- **Total: ~1100 tests**
+
+## Phase 19 Completed (2026-03-22)
+- [x] T159-T166: ACT-R activation model, PPR-based retrieval, forgetting engine, activation-aware context assembly, memory consolidation, graph maintenance
+- **Total: ~1250 tests**
+
+## Phase 20 Completed (2026-03-22)
+- [x] T167-T174: Goal node type, goal decomposition, cron evaluation, autonomy levels, constitutional principles, multi-model cross-validation, transactional rollback
+- **GraphBot is now a full autonomous agent framework**
+- **Total: 1457 tests, all passing**
+
 ## In Progress
-_Nothing._
+_Nothing. All planned phases (13-20) complete._
 
 ## Blocked
 _Nothing blocked._
