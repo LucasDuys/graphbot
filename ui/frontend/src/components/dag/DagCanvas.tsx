@@ -66,7 +66,7 @@ async function layoutNodes(
     target: e.target,
     label: e.label,
     animated: true,
-    style: { stroke: "var(--data-flow)" },
+    style: { stroke: "var(--data-flow)", strokeWidth: 1.5 },
   }));
 
   return { nodes, edges };
