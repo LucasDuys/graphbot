@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from core_gb.types import Domain, ExecutionResult, FlowType, TaskNode, TaskStatus
+from core_gb.patterns import PatternStore
+from core_gb.types import Domain, ExecutionResult, FlowType, Pattern, TaskNode, TaskStatus
 from graph.store import GraphStore
 from graph.updater import GraphUpdater
 
@@ -230,4 +231,82 @@ class TestGraphUpdater:
         pattern_node = store.get_node("PatternNode", pattern_id)
         assert pattern_node is not None
         assert pattern_node["id"] == pattern_id
+        store.close()
+
+    def test_increments_success_on_matched_pattern(self) -> None:
+        """When a matching pattern exists and execution succeeds,
+        success_count is incremented."""
+        store = _make_store()
+        ps = PatternStore(store)
+        # Pre-seed a pattern that will match the task
+        existing = Pattern(
+            id="existing-pat",
+            trigger="Weather in {slot_0}, {slot_1}, and {slot_2}",
+            description="Weather comparison",
+            variable_slots=("slot_0", "slot_1", "slot_2"),
+            tree_template="[]",
+            success_count=5,
+            failure_count=0,
+        )
+        ps.save(existing)
+
+        updater = GraphUpdater(store)
+        result = _success_result()
+
+        updater.update(
+            "Weather in Amsterdam, London, and Berlin",
+            _multi_node_list(),
+            result,
+        )
+
+        node = store.get_node("PatternNode", "existing-pat")
+        assert node is not None
+        assert int(node["success_count"]) == 6
+        store.close()
+
+    def test_increments_failure_on_matched_pattern(self) -> None:
+        """When a matching pattern exists and execution fails,
+        failure_count is incremented."""
+        store = _make_store()
+        ps = PatternStore(store)
+        existing = Pattern(
+            id="existing-fail-pat",
+            trigger="Weather in {slot_0}, {slot_1}, and {slot_2}",
+            description="Weather comparison",
+            variable_slots=("slot_0", "slot_1", "slot_2"),
+            tree_template="[]",
+            success_count=5,
+            failure_count=1,
+        )
+        ps.save(existing)
+
+        updater = GraphUpdater(store)
+        result = _failure_result()
+
+        updater.update(
+            "Weather in Amsterdam, London, and Berlin",
+            _multi_node_list(),
+            result,
+        )
+
+        node = store.get_node("PatternNode", "existing-fail-pat")
+        assert node is not None
+        assert int(node["failure_count"]) == 2
+        store.close()
+
+    def test_no_counter_change_when_no_matching_pattern(self) -> None:
+        """When no patterns exist, update() does not crash and works normally."""
+        store = _make_store()
+        updater = GraphUpdater(store)
+        result = _success_result()
+
+        # Should not raise even with no patterns in the graph
+        pattern_id = updater.update(
+            "Weather in Amsterdam, London, and Berlin",
+            _multi_node_list(),
+            result,
+        )
+
+        # A new pattern should still be extracted
+        assert pattern_id is not None
         store.close()

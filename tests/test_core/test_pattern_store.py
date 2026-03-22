@@ -20,6 +20,7 @@ def _make_pattern(
     description: str = "Multi-city weather lookup",
     variable_slots: tuple[str, ...] = ("slot_0", "slot_1"),
     success_count: int = 5,
+    failure_count: int = 0,
     avg_tokens: float = 320.0,
     avg_latency_ms: float = 850.0,
 ) -> Pattern:
@@ -29,6 +30,7 @@ def _make_pattern(
         description=description,
         variable_slots=variable_slots,
         success_count=success_count,
+        failure_count=failure_count,
         avg_tokens=avg_tokens,
         avg_latency_ms=avg_latency_ms,
     )
@@ -104,3 +106,63 @@ class TestPatternStore:
         assert len(loaded) == 3
         triggers = {p.trigger for p in loaded}
         assert triggers == {"Do A", "Do B", "Do C"}
+
+    def test_save_and_load_failure_count(self) -> None:
+        """failure_count is persisted and loaded correctly."""
+        store = _make_store()
+        ps = PatternStore(store)
+        original = _make_pattern(failure_count=3)
+
+        ps.save(original)
+        loaded = ps.load_all()
+
+        assert len(loaded) == 1
+        assert loaded[0].failure_count == 3
+
+    def test_save_failure_count_defaults_to_zero(self) -> None:
+        """A pattern with default failure_count=0 round-trips correctly."""
+        store = _make_store()
+        ps = PatternStore(store)
+        original = _make_pattern(failure_count=0)
+
+        ps.save(original)
+        loaded = ps.load_all()
+
+        assert len(loaded) == 1
+        assert loaded[0].failure_count == 0
+
+    def test_increment_failure(self) -> None:
+        """increment_failure() bumps failure_count by 1 and sets last_used."""
+        store = _make_store()
+        ps = PatternStore(store)
+        pattern = _make_pattern(pid="pat-fail", failure_count=0)
+        ps.save(pattern)
+
+        ps.increment_failure("pat-fail")
+
+        node = store.get_node("PatternNode", "pat-fail")
+        assert node is not None
+        assert int(node["failure_count"]) == 1
+        assert node["last_used"] is not None
+
+    def test_increment_failure_multiple_times(self) -> None:
+        """Calling increment_failure() multiple times accumulates correctly."""
+        store = _make_store()
+        ps = PatternStore(store)
+        pattern = _make_pattern(pid="pat-fail-multi", failure_count=2)
+        ps.save(pattern)
+
+        ps.increment_failure("pat-fail-multi")
+        ps.increment_failure("pat-fail-multi")
+
+        node = store.get_node("PatternNode", "pat-fail-multi")
+        assert node is not None
+        assert int(node["failure_count"]) == 4
+
+    def test_increment_failure_nonexistent_noop(self) -> None:
+        """increment_failure() on a nonexistent pattern does not raise."""
+        store = _make_store()
+        ps = PatternStore(store)
+
+        # Should not raise
+        ps.increment_failure("does-not-exist")
