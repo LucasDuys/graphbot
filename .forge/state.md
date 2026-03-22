@@ -1,7 +1,7 @@
 ---
 phase: in_progress
 spec: phase4-patterns
-current_task: T053
+current_task: T077
 task_status: complete
 iteration: 27
 tokens_used: 100000
@@ -58,6 +58,7 @@ None.
 
 ## What's Done (UI)
 - T049/T050: Next.js frontend scaffold with design system + React Flow DAG canvas (complete, committed a2bd66a)
+- T076/T077: Linear-inspired CSS design system + variable migration (complete, committed 795cca1)
 
 ## What's Next
 Run real tasks with API key to populate results. Continue with production readiness and UI integration.
