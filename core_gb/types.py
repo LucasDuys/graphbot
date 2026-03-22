@@ -170,6 +170,7 @@ class ExecutionResult:
     nodes: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     verification_results: tuple[VerificationResult, ...] = ()
+    expansion_count: int = 0
 
 
 @dataclass(frozen=True)

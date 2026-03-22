@@ -237,6 +237,8 @@ class DAGExecutor:
             )
 
             wave_completed_ids: list[str] = []
+            expandable_failures: list[tuple[str, ExecutionResult]] = []
+
             for completed_task in done_tasks:
                 node_id, result = completed_task.result()
                 results[node_id] = result
@@ -252,6 +254,9 @@ class DAGExecutor:
                         data_registry[key] = self._sanitizer.sanitize(raw_value)
                     if node.provides:
                         node.output_data[node.provides[0]] = output_text
+                else:
+                    # Track failed node for potential re-decomposition
+                    expandable_failures.append((node_id, result))
 
                 # Evaluate any conditional nodes whose predecessor just completed
                 newly_skipped = self._evaluate_conditionals(
@@ -265,6 +270,127 @@ class DAGExecutor:
                         skip_id, dep_graph, skipped_ids, node_by_id,
                     )
                     skipped_ids.update(transitive)
+
+            # --- Re-decomposition on failure ---
+            # For each failed leaf, attempt to expand it into a sub-DAG
+            # via the decomposer. If successful, execute the sub-DAG
+            # inline and replace the failed result.
+            for failed_id, failed_result in expandable_failures:
+                node_depth = expansion_depth.get(failed_id, 0)
+                if node_depth >= self._max_expansion_depth:
+                    logger.info(
+                        "Node %s failed but max expansion depth (%d) "
+                        "reached, not expanding further",
+                        failed_id,
+                        self._max_expansion_depth,
+                    )
+                    continue
+
+                failure_context = (
+                    "; ".join(failed_result.errors) or "Unknown failure"
+                )
+                failed_node = node_by_id[failed_id]
+                sub_dag = await self.expand_node(
+                    failed_node, failure_context,
+                )
+                if not sub_dag:
+                    continue
+
+                expansion_count += 1
+
+                # Propagate expansion depth to sub-DAG nodes
+                new_depth = node_depth + 1
+                for sub_node in sub_dag:
+                    expansion_depth[sub_node.id] = new_depth
+
+                # Rewire entry nodes of the sub-DAG to inherit the
+                # failed node's upstream dependencies
+                sub_ids = {n.id for n in sub_dag}
+                sub_leaves_list = [n for n in sub_dag if n.is_atomic]
+                for sn in sub_leaves_list:
+                    internal_deps = {
+                        r for r in sn.requires if r in sub_ids
+                    }
+                    if not internal_deps:
+                        sn.requires = list(failed_node.requires) + [
+                            r for r in sn.requires if r not in sub_ids
+                        ]
+
+                # Execute sub-DAG inline as a standalone sub-execution
+                logger.info(
+                    "Executing sub-DAG for failed node %s "
+                    "(expansion_count=%d, depth=%d)",
+                    failed_id,
+                    expansion_count,
+                    new_depth,
+                )
+                sub_result = await self.execute(
+                    sub_dag,
+                    _expansion_depth=expansion_depth,
+                    _expansion_count=expansion_count,
+                )
+                # Update expansion_count from the sub-execution
+                expansion_count = sub_result.expansion_count
+
+                if sub_result.success:
+                    # Replace the failed result with the sub-DAG result
+                    results[failed_id] = ExecutionResult(
+                        root_id=failed_result.root_id,
+                        output=sub_result.output,
+                        success=True,
+                        total_nodes=sub_result.total_nodes,
+                        total_tokens=(
+                            failed_result.total_tokens
+                            + sub_result.total_tokens
+                        ),
+                        total_latency_ms=(
+                            failed_result.total_latency_ms
+                            + sub_result.total_latency_ms
+                        ),
+                        total_cost=(
+                            failed_result.total_cost + sub_result.total_cost
+                        ),
+                        errors=(),
+                        expansion_count=expansion_count,
+                    )
+                    # Register the sub-DAG output data so downstream
+                    # nodes can consume it via the provides keys
+                    output_text = self._sanitizer.sanitize(
+                        sub_result.output,
+                    )
+                    for key in failed_node.provides:
+                        data_registry[key] = output_text
+                    if failed_node.provides:
+                        failed_node.output_data[
+                            failed_node.provides[0]
+                        ] = output_text
+                else:
+                    # Sub-DAG also failed; keep original failure but
+                    # record the expansion attempt
+                    results[failed_id] = ExecutionResult(
+                        root_id=failed_result.root_id,
+                        output=failed_result.output,
+                        success=False,
+                        total_nodes=(
+                            failed_result.total_nodes
+                            + sub_result.total_nodes
+                        ),
+                        total_tokens=(
+                            failed_result.total_tokens
+                            + sub_result.total_tokens
+                        ),
+                        total_latency_ms=(
+                            failed_result.total_latency_ms
+                            + sub_result.total_latency_ms
+                        ),
+                        total_cost=(
+                            failed_result.total_cost + sub_result.total_cost
+                        ),
+                        errors=(
+                            failed_result.errors + sub_result.errors
+                        ),
+                        expansion_count=expansion_count,
+                    )
 
             # Emit wave-complete event
             completed_so_far: set[str] = set(results.keys())
@@ -295,7 +421,29 @@ class DAGExecutor:
             n for n in dispatch_nodes
             if n.id not in skipped_ids and n.id not in loop_registry
         ]
-        return self._aggregate_results(root_id, active_leaves, results, node_by_id, start)
+        result = self._aggregate_results(
+            root_id, active_leaves, results, node_by_id, start,
+        )
+        # Attach the cumulative expansion count
+        if expansion_count > 0 or result.expansion_count != expansion_count:
+            result = ExecutionResult(
+                root_id=result.root_id,
+                output=result.output,
+                success=result.success,
+                total_nodes=result.total_nodes,
+                total_tokens=result.total_tokens,
+                total_latency_ms=result.total_latency_ms,
+                total_cost=result.total_cost,
+                context_tokens=result.context_tokens,
+                model_used=result.model_used,
+                tools_used=result.tools_used,
+                llm_calls=result.llm_calls,
+                nodes=result.nodes,
+                errors=result.errors,
+                verification_results=result.verification_results,
+                expansion_count=expansion_count,
+            )
+        return result
 
     def _prepare_conditionals(
         self,
@@ -644,6 +792,74 @@ class DAGExecutor:
             )
 
         return result_nodes
+
+    async def expand_node(
+        self,
+        node: TaskNode,
+        failure_context: str,
+    ) -> list[TaskNode] | None:
+        """Re-decompose a failed leaf node into a sub-DAG.
+
+        Invokes the decomposer with the original task description and the
+        failure context to produce a refined sub-DAG that replaces the
+        failed leaf in the mutable execution plan.
+
+        Args:
+            node: The failed TaskNode to re-decompose.
+            failure_context: A description of the failure (error messages,
+                stack traces, etc.) to guide the decomposer.
+
+        Returns:
+            A list of TaskNode instances forming the sub-DAG, or None if
+            expansion is not possible (no decomposer, empty result, or
+            decomposer raised an exception).
+        """
+        if self._decomposer is None:
+            return None
+
+        # Build augmented task description that includes the failure context
+        # so the decomposer can produce a refined plan avoiding the original
+        # failure mode.
+        augmented_task = (
+            f"[Re-decompose after failure] "
+            f"Failure: {failure_context} | "
+            f"Original task: {node.description}"
+        )
+
+        try:
+            sub_dag = await self._decomposer.decompose(
+                augmented_task,
+                failure_context=failure_context,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Re-decomposition failed for node %s: %s",
+                node.id,
+                exc,
+            )
+            return None
+
+        if not sub_dag:
+            logger.warning(
+                "Re-decomposition returned empty sub-DAG for node %s",
+                node.id,
+            )
+            return None
+
+        sub_leaves = [n for n in sub_dag if n.is_atomic]
+        if not sub_leaves:
+            logger.warning(
+                "Re-decomposition sub-DAG for node %s has no atomic leaves",
+                node.id,
+            )
+            return None
+
+        logger.info(
+            "Re-decomposed failed node %s into %d sub-nodes",
+            node.id,
+            len(sub_dag),
+        )
+        return sub_dag
 
     async def _execute_node(
         self,
