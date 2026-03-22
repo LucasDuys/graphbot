@@ -8,12 +8,14 @@ import logging
 import time
 import uuid
 from graphlib import TopologicalSorter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from core_gb.decomposer import Decomposer
     from models.router import ModelRouter
     from tools_gb.registry import ToolRegistry
+
+from core_gb.wave_event import WaveCompleteEvent
 
 import re
 
@@ -44,9 +46,14 @@ class DAGExecutor:
         tool_registry: ToolRegistry | None = None,
         verification_config: VerificationConfig | None = None,
         router: ModelRouter | None = None,
+        on_wave_complete: list[Callable[[WaveCompleteEvent], None]] | None = None,
+        max_expansion_depth: int = 2,
     ) -> None:
         self._executor = executor
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._on_wave_complete: list[Callable[[WaveCompleteEvent], None]] = (
+            on_wave_complete if on_wave_complete is not None else []
+        )
         self._aggregator = Aggregator()
         self._sanitizer = OutputSanitizer()
         self._verification_config = verification_config or VerificationConfig()
@@ -64,23 +71,49 @@ class DAGExecutor:
         )
         self._tool_registry = tool_registry
         self._decomposer: Decomposer | None = None
+        self._max_expansion_depth: int = max_expansion_depth
         self.aggregation_template: dict | None = None
 
-    async def execute(self, nodes: list[TaskNode]) -> ExecutionResult:
+    async def execute(
+        self,
+        nodes: list[TaskNode],
+        _expansion_depth: dict[str, int] | None = None,
+        _expansion_count: int = 0,
+    ) -> ExecutionResult:
         """Execute a DAG of TaskNodes with parallel streaming dispatch.
 
         Flow:
-        1. Filter to atomic (leaf) nodes only.
+        1. Filter to atomic (leaf) nodes only, handling LoopNode and
+           ConditionalNode control flow nodes specially.
         2. Build dependency graph from node.requires fields.
         3. Use TopologicalSorter in streaming mode (prepare/get_ready/done).
         4. Launch ready nodes concurrently, bounded by semaphore.
         5. As each completes, call sorter.done() to unblock dependents.
         6. Forward data from completed nodes to their dependents.
         7. Resolve conditional branches: evaluate conditions and skip branches.
-        8. Aggregate all results into a single ExecutionResult.
+        8. Handle LoopNode: when a loop placeholder becomes ready, dispatch
+           body nodes via execute_loop(), register output, mark done.
+        9. Propagate skipping transitively to dependents of skipped nodes.
+        10. On leaf failure: attempt re-decomposition via expand_node() if a
+            decomposer is available and max_expansion_depth not exceeded.
+        11. Aggregate all results into a single ExecutionResult.
+
+        Args:
+            nodes: The list of TaskNode instances forming the DAG.
+            _expansion_depth: Internal tracker mapping node IDs to their
+                current expansion depth. Passed through recursive calls
+                after re-decomposition. Callers should not set this.
+            _expansion_count: Internal counter of how many expansions have
+                occurred so far. Passed through recursive calls. Callers
+                should not set this.
         """
         start = time.perf_counter()
         root_id = str(uuid.uuid4())
+
+        expansion_depth: dict[str, int] = (
+            dict(_expansion_depth) if _expansion_depth is not None else {}
+        )
+        expansion_count: int = _expansion_count
 
         # Lazy expansion: replace expandable nodes with sub-DAGs from decomposer
         nodes = await self._expand_nodes(nodes)
@@ -90,10 +123,41 @@ class DAGExecutor:
         nodes, conditional_registry = self._prepare_conditionals(nodes)
         skipped_ids: set[str] = set()
 
-        # Filter to leaf nodes only
-        leaves = [n for n in nodes if n.is_atomic]
+        # --- Identify LoopNodes and extract their body nodes ---
+        loop_registry: dict[str, LoopNode] = {}
+        loop_body_ids: set[str] = set()
+        for node in nodes:
+            if isinstance(node, LoopNode):
+                loop_registry[node.id] = node
+                loop_body_ids.update(node.body_nodes)
 
-        if not leaves:
+        node_by_id: dict[str, TaskNode] = {n.id: n for n in nodes}
+
+        # Resolve loop body nodes: map loop_id -> list of body TaskNode objects
+        loop_body_nodes: dict[str, list[TaskNode]] = {}
+        for loop_id, loop_node in loop_registry.items():
+            body: list[TaskNode] = []
+            for bn_id in loop_node.body_nodes:
+                bn = node_by_id.get(bn_id)
+                if bn is not None:
+                    body.append(bn)
+            loop_body_nodes[loop_id] = body
+
+        # Build the dispatchable set: atomic leaves that are NOT loop body
+        # nodes (those are dispatched inside execute_loop), plus loop
+        # placeholders that participate in the topological sort.
+        leaves = [
+            n for n in nodes
+            if n.is_atomic and n.id not in loop_body_ids
+        ]
+
+        # Add loop nodes as dispatchable entries (they act as single units
+        # in the topological sort, dispatched via execute_loop when ready)
+        dispatch_nodes: list[TaskNode] = list(leaves)
+        for loop_id, loop_node in loop_registry.items():
+            dispatch_nodes.append(loop_node)
+
+        if not dispatch_nodes:
             return ExecutionResult(
                 root_id=root_id,
                 output="",
@@ -102,19 +166,21 @@ class DAGExecutor:
                 total_tokens=0,
                 total_latency_ms=0.0,
                 total_cost=0.0,
+                expansion_count=expansion_count,
             )
 
-        node_by_id: dict[str, TaskNode] = {n.id: n for n in nodes}
-        leaf_set: set[str] = {n.id for n in leaves}
+        dispatch_set: set[str] = {n.id for n in dispatch_nodes}
 
-        # Build dependency graph: only leaf-to-leaf dependencies
-        dep_graph: dict[str, set[str]] = {n.id: set() for n in leaves}
-        for leaf in leaves:
-            for req_id in leaf.requires:
-                if req_id in leaf_set:
-                    dep_graph[leaf.id].add(req_id)
+        # Build dependency graph over dispatchable entries
+        dep_graph: dict[str, set[str]] = {n.id: set() for n in dispatch_nodes}
+        for dnode in dispatch_nodes:
+            for req_id in dnode.requires:
+                if req_id in dispatch_set:
+                    dep_graph[dnode.id].add(req_id)
                 elif req_id in node_by_id:
-                    self._collect_leaf_deps(req_id, node_by_id, leaf_set, dep_graph[leaf.id])
+                    self._collect_leaf_deps(
+                        req_id, node_by_id, dispatch_set, dep_graph[dnode.id],
+                    )
 
         # Data registry: maps provides keys to output text
         data_registry: dict[str, str] = {}
@@ -123,48 +189,112 @@ class DAGExecutor:
         sorter: TopologicalSorter[str] = TopologicalSorter(dep_graph)
         sorter.prepare()
 
-        pending: set[asyncio.Task[tuple[str, ExecutionResult]]] = set()
+        wave_index: int = 0
+        all_dispatch_ids: set[str] = set(dispatch_set)
 
         while sorter.is_active():
             ready = sorter.get_ready()
+            wave_tasks: set[asyncio.Task[tuple[str, ExecutionResult]]] = set()
+            wave_node_ids: list[str] = []
+
             for node_id in ready:
                 # Skip nodes that were marked SKIPPED by conditional routing
                 if node_id in skipped_ids:
                     sorter.done(node_id)
+                    # Transitively skip dependents of skipped nodes
+                    newly_skipped = self._propagate_skips(
+                        node_id, dep_graph, skipped_ids, node_by_id,
+                    )
+                    skipped_ids.update(newly_skipped)
                     continue
+
+                # --- LoopNode dispatch: run via execute_loop ---
+                if node_id in loop_registry:
+                    loop_node = loop_registry[node_id]
+                    body = loop_body_nodes.get(node_id, [])
+                    wave_node_ids.append(node_id)
+                    task = asyncio.create_task(
+                        self._execute_loop_in_dispatch(
+                            loop_node, body, data_registry.copy(),
+                        )
+                    )
+                    wave_tasks.add(task)
+                    continue
+
+                wave_node_ids.append(node_id)
                 node = node_by_id[node_id]
                 task = asyncio.create_task(
                     self._execute_node(node, data_registry.copy())
                 )
-                pending.add(task)
+                wave_tasks.add(task)
 
-            if pending:
-                done, pending = await asyncio.wait(
-                    pending, return_when=asyncio.FIRST_COMPLETED
+            if not wave_tasks:
+                continue
+
+            # Wait for all tasks in this wave to complete
+            done_tasks, _ = await asyncio.wait(
+                wave_tasks, return_when=asyncio.ALL_COMPLETED
+            )
+
+            wave_completed_ids: list[str] = []
+            for completed_task in done_tasks:
+                node_id, result = completed_task.result()
+                results[node_id] = result
+                wave_completed_ids.append(node_id)
+                sorter.done(node_id)
+
+                # Register provided data keys (sanitize before forwarding)
+                if result.success:
+                    node = node_by_id[node_id]
+                    output_text = self._sanitizer.sanitize(result.output)
+                    for key in node.provides:
+                        raw_value = node.output_data.get(key, output_text)
+                        data_registry[key] = self._sanitizer.sanitize(raw_value)
+                    if node.provides:
+                        node.output_data[node.provides[0]] = output_text
+
+                # Evaluate any conditional nodes whose predecessor just completed
+                newly_skipped = self._evaluate_conditionals(
+                    node_id, conditional_registry, data_registry, node_by_id,
                 )
-                for completed_task in done:
-                    node_id, result = completed_task.result()
-                    results[node_id] = result
-                    sorter.done(node_id)
+                skipped_ids.update(newly_skipped)
 
-                    # Register provided data keys (sanitize before forwarding)
-                    if result.success:
-                        node = node_by_id[node_id]
-                        output_text = self._sanitizer.sanitize(result.output)
-                        for key in node.provides:
-                            raw_value = node.output_data.get(key, output_text)
-                            data_registry[key] = self._sanitizer.sanitize(raw_value)
-                        if node.provides:
-                            node.output_data[node.provides[0]] = output_text
-
-                    # Evaluate any conditional nodes whose predecessor just completed
-                    newly_skipped = self._evaluate_conditionals(
-                        node_id, conditional_registry, data_registry, node_by_id,
+                # Transitively propagate skips to dependents of newly skipped nodes
+                for skip_id in list(newly_skipped):
+                    transitive = self._propagate_skips(
+                        skip_id, dep_graph, skipped_ids, node_by_id,
                     )
-                    skipped_ids.update(newly_skipped)
+                    skipped_ids.update(transitive)
 
-        # Filter skipped nodes out of the leaves list for aggregation
-        active_leaves = [n for n in leaves if n.id not in skipped_ids]
+            # Emit wave-complete event
+            completed_so_far: set[str] = set(results.keys())
+            remaining = sorted(
+                nid for nid in all_dispatch_ids
+                if nid not in completed_so_far and nid not in skipped_ids
+            )
+            accumulated: dict[str, str] = {
+                nid: r.output for nid, r in results.items()
+            }
+            event = WaveCompleteEvent(
+                wave_index=wave_index,
+                completed_nodes=sorted(wave_completed_ids),
+                accumulated_results=accumulated,
+                remaining_nodes=remaining,
+            )
+            for callback in self._on_wave_complete:
+                try:
+                    callback(event)
+                except Exception as exc:
+                    logger.warning(
+                        "on_wave_complete callback raised: %s", exc,
+                    )
+            wave_index += 1
+
+        # Filter skipped nodes out of the dispatch list for aggregation
+        active_leaves = [
+            n for n in dispatch_nodes
+            if n.id not in skipped_ids and n.id not in loop_registry
+        ]
         return self._aggregate_results(root_id, active_leaves, results, node_by_id, start)
 
     def _prepare_conditionals(
@@ -322,6 +452,97 @@ class DAGExecutor:
                 skipped.add(skip_id)
 
         return skipped
+
+    async def _execute_loop_in_dispatch(
+        self,
+        loop_node: LoopNode,
+        body_nodes: list[TaskNode],
+        data_snapshot: dict[str, str],
+    ) -> tuple[str, ExecutionResult]:
+        """Execute a LoopNode as a single dispatchable unit within topological dispatch.
+
+        Injects upstream data from the data snapshot into the loop body nodes'
+        consumes fields, then delegates to execute_loop() for iteration. Returns
+        the loop node ID and the aggregated ExecutionResult so the dispatch loop
+        can register provided data and mark the loop done.
+
+        Args:
+            loop_node: The LoopNode to execute.
+            body_nodes: The TaskNode instances forming the loop body.
+            data_snapshot: Current data registry snapshot for context injection.
+
+        Returns:
+            Tuple of (loop_node.id, ExecutionResult).
+        """
+        import copy
+
+        # Inject upstream consumed data into body node descriptions
+        consumed_data: dict[str, str] = {}
+        for key in loop_node.consumes:
+            if key in data_snapshot:
+                consumed_data[key] = data_snapshot[key]
+
+        prepared_body: list[TaskNode] = []
+        for bn in body_nodes:
+            bn_copy = copy.copy(bn)
+            if consumed_data:
+                context_parts = [f"[{k}]: {v}" for k, v in consumed_data.items()]
+                context_str = "\n".join(context_parts)
+                bn_copy.description = (
+                    f"<forwarded_data>\n{context_str}\n</forwarded_data>\n\n"
+                    f"{bn.description}"
+                )
+            prepared_body.append(bn_copy)
+
+        result = await self.execute_loop(loop_node, prepared_body)
+        return loop_node.id, result
+
+    @staticmethod
+    def _propagate_skips(
+        skipped_node_id: str,
+        dep_graph: dict[str, set[str]],
+        already_skipped: set[str],
+        node_by_id: dict[str, TaskNode],
+    ) -> set[str]:
+        """Transitively skip nodes whose dependencies are all skipped.
+
+        When a node is skipped (e.g. via conditional routing), any downstream
+        node that depends exclusively on skipped nodes should also be skipped.
+        This handles nested conditionals where an inner conditional's branches
+        depend on a node that was skipped by the outer conditional.
+
+        Args:
+            skipped_node_id: The node that was just skipped.
+            dep_graph: The dependency graph (node_id -> set of dependency IDs).
+            already_skipped: The current set of skipped node IDs.
+            node_by_id: Lookup dict for all nodes.
+
+        Returns:
+            Set of newly skipped node IDs (not including already_skipped).
+        """
+        newly_skipped: set[str] = set()
+        # Build a combined set of all skipped IDs (existing + the new one)
+        all_skipped = already_skipped | {skipped_node_id}
+
+        # Check all nodes in the dep graph for transitive skipping
+        changed = True
+        while changed:
+            changed = False
+            for node_id, deps in dep_graph.items():
+                if node_id in all_skipped:
+                    continue
+                if not deps:
+                    continue
+                # If ALL dependencies of this node are skipped, skip it too
+                if deps.issubset(all_skipped):
+                    target = node_by_id.get(node_id)
+                    if target is not None:
+                        target.status = TaskStatus.SKIPPED
+                    all_skipped.add(node_id)
+                    newly_skipped.add(node_id)
+                    changed = True
+
+        return newly_skipped
 
     async def _expand_nodes(self, nodes: list[TaskNode]) -> list[TaskNode]:
         """Replace expandable nodes with sub-DAGs from the decomposer.
