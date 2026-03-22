@@ -11,10 +11,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 62,
-    "latency_ms": 2604,
-    "cost": 1.48e-06,
-    "output_preview": "## File List\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase10a-prompt-quality-frontier.md\", \".forge\\\\plans\\\\phase10b-ui-redesign-frontier.md\", \".forge\\\\plans\\\\phase2-dec",
+    "tokens": 65,
+    "latency_ms": 2284,
+    "cost": 1.63e-06,
+    "output_preview": "## File List\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\capabilities.json\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase10a-prompt-quality-frontier.md\", \".forge\\\\plans\\\\phase10b-ui-redesign-frontier.md",
     "errors": []
   },
   {
@@ -29,9 +29,9 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 182,
-    "latency_ms": 2412,
-    "cost": 4.184e-05,
+    "tokens": 167,
+    "latency_ms": 2613,
+    "cost": 3.734e-05,
     "output_preview": "## File Content\n     1 | # CLAUDE.md -- GraphBot Project Orchestration\n     2 | \n     3 | ## Identity\n     4 | \n     5 | You are the lead architect and sole developer of **GraphBot**, a recursive execution engine powered by a temporal knowledge graph that enables free/cheap LLMs to match the capabil",
     "errors": []
   },
@@ -43,14 +43,14 @@
       "file_search"
     ],
     "difficulty": 1,
-    "success": false,
+    "success": true,
     "tool_used": false,
     "model": "",
-    "nodes": 3,
-    "tokens": 98,
-    "latency_ms": 47349,
-    "cost": 3.25e-06,
-    "output_preview": "## File List\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase10a-prompt-quality-frontier.md\", \".forge\\\\plans\\\\phase10b-ui-redesign-frontier.md\", \".forge\\\\plans\\\\phase2-dec",
+    "nodes": 2,
+    "tokens": 14288,
+    "latency_ms": 28828,
+    "cost": 0.00029158,
+    "output_preview": "## Python Files\n{\"success\": true, \"files\": [\".claude\\\\settings.json\", \".dockerignore\", \".env.local\", \".forge\\\\capabilities.json\", \".forge\\\\config.json\", \".forge\\\\plans\\\\phase1-foundation-frontier.md\", \".forge\\\\plans\\\\phase10a-prompt-quality-frontier.md\", \".forge\\\\plans\\\\phase10b-ui-redesign-frontier",
     "errors": []
   },
   {
@@ -65,10 +65,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 3,
-    "tokens": 28126,
-    "latency_ms": 385058,
-    "cost": 0.00097976,
-    "output_preview": "## Dependencies from pyproject.toml\n\n['.claude/settings.json', '.dockerignore', '.env.local', '.forge/config.json', '.forge/plans/phase1-foundation-frontier.md', '.forge/plans/phase10a-prompt-quality-frontier.md', '.forge/plans/phase10b-ui-redesign-frontier.md', '.forge/plans/phase2-decomposition-fr",
+    "tokens": 57,
+    "latency_ms": 1736,
+    "cost": 1.2e-06,
+    "output_preview": "## File Content\n     1 | [project]\n     2 | name = \"graphbot\"\n     3 | version = \"0.1.0\"\n     4 | description = \"Recursive DAG execution engine with temporal knowledge graph for free LLM inference\"\n     5 | readme = { file = \"README.md\", content-type = \"text/markdown\" }\n     6 | requires-python = \">",
     "errors": []
   },
   {
@@ -83,10 +83,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 99,
-    "latency_ms": 1829,
-    "cost": 3.21e-06,
-    "output_preview": "## Dependencies from pyproject.toml\n\n[No data for dependency_list]",
+    "tokens": 97,
+    "latency_ms": 3292,
+    "cost": 3.11e-06,
+    "output_preview": "## Search Results\n{\"success\": true, \"results\": [{\"title\": \"Fast, scalable graph querying and visualization with Kuzu and\", \"url\": \"https://gdotv.com/blog/fast-scalable-graph-querying-and-visualization-with-kuzu-and-g-v/\", \"snippet\": \"One ofthebenefits of using G.V() withKuzuistheability to easily ap",
     "errors": []
   },
   {
@@ -100,11 +100,11 @@
     "success": false,
     "tool_used": false,
     "model": "",
-    "nodes": 2,
-    "tokens": 0,
-    "latency_ms": 8783,
-    "cost": 0.0,
-    "output_preview": "Collected {\"success\": false, \"stdout\": \"\", \"stderr\": \"'Count' is not recognized as an internal or external command,\\r\\noperable program or batch file.\", \"exit_code\": 1} tests",
+    "nodes": 3,
+    "tokens": 177,
+    "latency_ms": 15435,
+    "cost": 4.59e-06,
+    "output_preview": "Collected 0 tests.",
     "errors": []
   },
   {
@@ -119,10 +119,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 637,
-    "latency_ms": 15504,
-    "cost": 8.132e-05,
-    "output_preview": "## Top 5 Free LLM API Providers 2026\n\n{\"success\": true, \"results\": [{\"title\": \"Free LLM API Directory | 45+ Free AI Providers (2026)\", \"url\": \"https://free-llm.com/\", \"snippet\": \"While majorproviderslike OpenAI often charge per token, a growing ecosystem offreeLLMAPIshas emerged. ... offreeLLMAPIsin",
+    "tokens": 412,
+    "latency_ms": 10769,
+    "cost": 0.00011084,
+    "output_preview": "Collected [No data for result] tests.",
     "errors": []
   },
   {
@@ -133,14 +133,14 @@
       "shell_run"
     ],
     "difficulty": 2,
-    "success": true,
+    "success": false,
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 336,
-    "latency_ms": 2594,
-    "cost": 8.34e-06,
-    "output_preview": "## Last 10 Commits\n\nThe changes include improvements to tool awareness, phase 10A and 10B specs, tool routing, and the addition of various tools such as web scraping/search tools, shell execution tools, file tools, and a tool registry.",
+    "tokens": 123,
+    "latency_ms": 1891,
+    "cost": 4.5e-06,
+    "output_preview": "Collected [No data for result] tests.",
     "errors": []
   },
   {
@@ -155,10 +155,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 2,
-    "tokens": 207,
-    "latency_ms": 5609,
-    "cost": 4.934e-05,
-    "output_preview": "## Last 10 Commits\n\n[No data for summary]",
+    "tokens": 161,
+    "latency_ms": 5863,
+    "cost": 3.554e-05,
+    "output_preview": "Collected [No data for result] tests.",
     "errors": []
   },
   {
@@ -173,10 +173,10 @@
     "tool_used": false,
     "model": "",
     "nodes": 3,
-    "tokens": 250,
-    "latency_ms": 1958,
-    "cost": 9.08e-06,
-    "output_preview": "## Last 10 Commits\n\n[No data for summary]",
+    "tokens": 388,
+    "latency_ms": 3521,
+    "cost": 1.598e-05,
+    "output_preview": "Collected [No data for result] tests.",
     "errors": []
   }
 ]
