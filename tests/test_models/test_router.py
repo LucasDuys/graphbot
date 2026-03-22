@@ -8,7 +8,7 @@ import pytest
 
 from core_gb.types import CompletionResult, Domain, TaskNode, TaskStatus
 from models.base import ModelProvider
-from models.errors import ProviderError, RateLimitError
+from models.errors import AllProvidersExhaustedError, ProviderError, RateLimitError
 from models.router import DEFAULT_MODEL_MAP, ModelRouter
 
 
@@ -136,31 +136,34 @@ class TestRouting:
             call_args = provider._mock_complete.call_args
             assert call_args[0][1] == DEFAULT_MODEL_MAP[complexity]
 
-    async def test_provider_error_propagates(self) -> None:
+    async def test_provider_error_raises_all_exhausted(self) -> None:
         provider = FakeProvider()
         provider._mock_complete.side_effect = ProviderError(
             "boom", provider="fake", model="x"
         )
         router = ModelRouter(provider=provider)
 
-        with pytest.raises(ProviderError):
+        with pytest.raises(AllProvidersExhaustedError) as exc_info:
             await router.route(
                 _make_task(complexity=1),
                 [{"role": "user", "content": "hi"}],
             )
+        assert len(exc_info.value.errors) == 1
+        assert isinstance(exc_info.value.errors[0], ProviderError)
 
-    async def test_rate_limit_error_propagates(self) -> None:
+    async def test_rate_limit_error_raises_all_exhausted(self) -> None:
         provider = FakeProvider()
         provider._mock_complete.side_effect = RateLimitError(
             "too fast", provider="fake", model="x"
         )
         router = ModelRouter(provider=provider)
 
-        with pytest.raises(RateLimitError):
+        with pytest.raises(AllProvidersExhaustedError) as exc_info:
             await router.route(
                 _make_task(complexity=2),
                 [{"role": "user", "content": "hi"}],
             )
+        assert isinstance(exc_info.value.errors[0], RateLimitError)
 
     async def test_route_returns_completion_result(self) -> None:
         provider = FakeProvider()

@@ -8,7 +8,7 @@ import pytest
 
 from core_gb.types import CompletionResult, Domain, TaskNode, TaskStatus
 from models.circuit_breaker import CircuitBreakerManager
-from models.errors import ProviderError
+from models.errors import AllProvidersExhaustedError, ProviderError
 from models.rate_limiter import RateLimiterManager
 from models.router import ModelRouter
 
@@ -97,8 +97,8 @@ class TestRouteWithCircuitBreakerClosed:
 
 
 class TestRouteWithCircuitBreakerOpen:
-    async def test_raises_provider_error_when_circuit_open(self) -> None:
-        """Raises ProviderError when the circuit is open."""
+    async def test_raises_all_exhausted_when_circuit_open(self) -> None:
+        """Raises AllProvidersExhaustedError when all circuits are open."""
         provider = _make_provider()
 
         cb = MagicMock(spec=CircuitBreakerManager)
@@ -106,11 +106,13 @@ class TestRouteWithCircuitBreakerOpen:
 
         router = ModelRouter(provider=provider, circuit_breaker=cb)
 
-        with pytest.raises(ProviderError, match="Circuit open"):
+        with pytest.raises(AllProvidersExhaustedError) as exc_info:
             await router.route(
                 _make_task(), [{"role": "user", "content": "hi"}]
             )
 
+        assert len(exc_info.value.errors) == 1
+        assert "Circuit open" in str(exc_info.value.errors[0])
         # Provider should never be called when circuit is open.
         provider.complete.assert_not_awaited()
 
@@ -147,7 +149,7 @@ class TestFailureRecordedInBreaker:
 
         router = ModelRouter(provider=provider, circuit_breaker=cb)
 
-        with pytest.raises(ProviderError):
+        with pytest.raises(AllProvidersExhaustedError):
             await router.route(
                 _make_task(), [{"role": "user", "content": "hi"}]
             )

@@ -18,3 +18,12 @@ class RateLimitError(ProviderError):
 
 class AuthError(ProviderError):
     """Raised when authentication with the provider fails."""
+
+
+class AllProvidersExhaustedError(Exception):
+    """Raised when every provider in the rotation has failed."""
+
+    def __init__(self, errors: list[ProviderError]) -> None:
+        self.errors = errors
+        names = [e.provider for e in errors]
+        super().__init__(f"All providers exhausted: {', '.join(names)}")

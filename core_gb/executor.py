@@ -9,7 +9,7 @@ import uuid
 from core_gb.types import CompletionResult, ExecutionResult, TaskNode, TaskStatus, Domain
 from graph.resolver import EntityResolver
 from graph.store import GraphStore
-from models.errors import ProviderError
+from models.errors import AllProvidersExhaustedError, ProviderError
 from models.router import ModelRouter
 
 
@@ -151,8 +151,13 @@ class SimpleExecutor:
                 nodes=(root_id,),
                 errors=(),
             )
-        except ProviderError as exc:
+        except (ProviderError, AllProvidersExhaustedError) as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000
+
+            if isinstance(exc, AllProvidersExhaustedError):
+                error_strs = tuple(str(e) for e in exc.errors)
+            else:
+                error_strs = (str(exc),)
 
             return ExecutionResult(
                 root_id=root_id,
@@ -165,7 +170,7 @@ class SimpleExecutor:
                 context_tokens=context.total_tokens,
                 model_used="",
                 nodes=(root_id,),
-                errors=(str(exc),),
+                errors=error_strs,
             )
 
     @staticmethod
