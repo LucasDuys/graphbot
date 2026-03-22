@@ -8,11 +8,16 @@ import logging
 import time
 import uuid
 from graphlib import TopologicalSorter
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models.router import ModelRouter
+    from tools_gb.registry import ToolRegistry
 
 from core_gb.aggregator import Aggregator
 from core_gb.sanitizer import OutputSanitizer
 from core_gb.types import ExecutionResult, TaskNode
-from core_gb.verification import VerificationLayer1
+from core_gb.verification import VerificationConfig, VerificationLayer1, VerificationLayer2
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +34,26 @@ class DAGExecutor:
         executor: object,
         max_concurrency: int = 10,
         tool_registry: ToolRegistry | None = None,
+        verification_config: VerificationConfig | None = None,
+        router: ModelRouter | None = None,
     ) -> None:
         self._executor = executor
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._aggregator = Aggregator()
         self._sanitizer = OutputSanitizer()
+        self._verification_config = verification_config or VerificationConfig()
         self._verifier = VerificationLayer1()
+        # Layer 2 requires a ModelRouter for 3-way sampling. If no router
+        # is provided, L2 verification is unavailable and will be skipped
+        # even when config thresholds are met.
+        self._layer2_verifier: VerificationLayer2 | None = (
+            VerificationLayer2(
+                router=router,
+                complexity_threshold=self._verification_config.layer2_threshold,
+            )
+            if router is not None
+            else None
+        )
         self._tool_registry = tool_registry
         self.aggregation_template: dict | None = None
 
@@ -172,37 +191,112 @@ class DAGExecutor:
                     errors=(str(exc),),
                 )
 
-            # Layer 1 verification: run on every successful node output.
-            # JSON check is not applied here because the DAG aggregation
-            # layer already handles non-JSON output gracefully. The JSON
-            # check is available via VerificationLayer1.verify() for callers
-            # that explicitly know JSON was requested.
+            # --- Verification pipeline (config-driven) ---
             if result.success:
-                verified_output, vr = await self._verifier.verify_and_retry(
-                    output=result.output,
-                    node=node,
-                    executor=self._executor,
-                    expects_json=False,
-                )
-                if verified_output != result.output:
-                    # Replace output with the verified (retried) version
-                    result = ExecutionResult(
-                        root_id=result.root_id,
-                        output=verified_output,
-                        success=result.success,
-                        total_nodes=result.total_nodes,
-                        total_tokens=result.total_tokens,
-                        total_latency_ms=result.total_latency_ms,
-                        total_cost=result.total_cost,
-                        context_tokens=result.context_tokens,
-                        model_used=result.model_used,
-                        tools_used=result.tools_used,
-                        llm_calls=result.llm_calls,
-                        nodes=result.nodes,
-                        errors=result.errors,
-                    )
+                result = await self._apply_verification(node, result, task_text)
 
             return node.id, result
+
+    async def _apply_verification(
+        self,
+        node: TaskNode,
+        result: ExecutionResult,
+        task_text: str,
+    ) -> ExecutionResult:
+        """Apply verification layers to a successful node output based on config.
+
+        Layer application rules (cumulative):
+        - Layer 1: Runs if verification_config.layer1_enabled is True.
+        - Layer 2: Runs if node.complexity >= verification_config.layer2_threshold
+          and a Layer 2 verifier is available (requires ModelRouter).
+        - Layer 3: Runs if node.complexity >= verification_config.layer3_threshold
+          AND verification_config.layer3_opt_in is True (not yet implemented).
+
+        Args:
+            node: The TaskNode being verified.
+            result: The ExecutionResult from node execution.
+            task_text: The task description text (for building L2 messages).
+
+        Returns:
+            Potentially updated ExecutionResult after verification.
+        """
+        cfg = self._verification_config
+
+        # Layer 1: rule-based format/type checks with single retry
+        if cfg.layer1_enabled:
+            verified_output, vr = await self._verifier.verify_and_retry(
+                output=result.output,
+                node=node,
+                executor=self._executor,
+                expects_json=False,
+            )
+            if verified_output != result.output:
+                result = ExecutionResult(
+                    root_id=result.root_id,
+                    output=verified_output,
+                    success=result.success,
+                    total_nodes=result.total_nodes,
+                    total_tokens=result.total_tokens,
+                    total_latency_ms=result.total_latency_ms,
+                    total_cost=result.total_cost,
+                    context_tokens=result.context_tokens,
+                    model_used=result.model_used,
+                    tools_used=result.tools_used,
+                    llm_calls=result.llm_calls,
+                    nodes=result.nodes,
+                    errors=result.errors,
+                )
+
+        # Layer 2: self-consistency via 3-way sampling
+        if (
+            node.complexity >= cfg.layer2_threshold
+            and self._layer2_verifier is not None
+        ):
+            messages = [{"role": "user", "content": task_text}]
+            logger.info(
+                "Running Layer 2 verification for node %s (complexity=%d)",
+                node.id,
+                node.complexity,
+            )
+            sampling_result = await self._layer2_verifier.verify(
+                node, messages,
+            )
+            if sampling_result.low_confidence:
+                logger.warning(
+                    "Layer 2 low confidence for node %s (score=%.2f)",
+                    node.id,
+                    sampling_result.agreement_score,
+                )
+            # Update result with L2 output and aggregated cost/tokens
+            result = ExecutionResult(
+                root_id=result.root_id,
+                output=sampling_result.content,
+                success=result.success,
+                total_nodes=result.total_nodes,
+                total_tokens=result.total_tokens + sampling_result.tokens_in + sampling_result.tokens_out,
+                total_latency_ms=result.total_latency_ms + sampling_result.latency_ms,
+                total_cost=result.total_cost + sampling_result.cost,
+                context_tokens=result.context_tokens,
+                model_used=result.model_used,
+                tools_used=result.tools_used,
+                llm_calls=result.llm_calls,
+                nodes=result.nodes,
+                errors=result.errors,
+            )
+
+        # Layer 3: CRITIC-style knowledge graph verification (placeholder)
+        if (
+            node.complexity >= cfg.layer3_threshold
+            and cfg.layer3_opt_in
+        ):
+            logger.info(
+                "Layer 3 verification eligible for node %s (complexity=%d) "
+                "but not yet implemented",
+                node.id,
+                node.complexity,
+            )
+
+        return result
 
     def _collect_leaf_deps(
         self,

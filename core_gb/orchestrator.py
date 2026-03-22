@@ -14,6 +14,7 @@ from core_gb.intake import IntakeParser, TaskType
 from core_gb.patterns import PatternMatcher, PatternStore
 from core_gb.safety import IntentClassifier
 from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode, TaskStatus
+from core_gb.verification import VerificationConfig
 from graph.resolver import EntityResolver
 from graph.store import GraphStore
 from graph.updater import GraphUpdater
@@ -31,13 +32,24 @@ class Orchestrator:
     Pattern matching provides a cache layer before decomposition.
     """
 
-    def __init__(self, store: GraphStore, router: ModelRouter) -> None:
+    def __init__(
+        self,
+        store: GraphStore,
+        router: ModelRouter,
+        verification_config: VerificationConfig | None = None,
+    ) -> None:
         self._store = store
         self._router = router
+        self._verification_config = verification_config or VerificationConfig()
         self._intake = IntakeParser()
         self._tool_registry = ToolRegistry(workspace=str(Path.cwd()), router=router)
         self._executor = SimpleExecutor(store, router, tool_registry=self._tool_registry)
-        self._dag_executor = DAGExecutor(self._executor, tool_registry=self._tool_registry)
+        self._dag_executor = DAGExecutor(
+            self._executor,
+            tool_registry=self._tool_registry,
+            verification_config=self._verification_config,
+            router=router,
+        )
         self._decomposer = Decomposer(router)
         self._resolver = EntityResolver(store)
         self._pattern_store = PatternStore(store)
