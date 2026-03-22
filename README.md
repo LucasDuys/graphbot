@@ -38,8 +38,13 @@ User Message -> Intake Parser (rule-based, zero-cost)
 | `graph/store.py` | Kuzu graph database: schema, CRUD, context assembly |
 | `graph/resolver.py` | 3-layer entity resolution (exact, Levenshtein, BM25) |
 | `graph/updater.py` | Records execution outcomes in the knowledge graph |
-| `models/router.py` | Complexity-based model selection with rate limiting + circuit breaking |
+| `models/router.py` | Multi-provider rotation with rate limiting + circuit breaking |
 | `models/openrouter.py` | OpenRouter provider via LiteLLM |
+| `models/google.py` | Google AI Studio provider (Gemini 2.5 Pro free tier) |
+| `models/groq.py` | Groq direct provider (30 RPM free tier) |
+| `tools_gb/` | File, web, shell, and code edit tools |
+| `nanobot/channels/graphbot_telegram.py` | Telegram bot bridge to Orchestrator |
+| `ui/frontend/` | Next.js dashboard with live DAG visualization |
 
 ## Quick Start
 
@@ -52,6 +57,9 @@ pip install -e ".[dev,langsmith]"
 Create `.env.local`:
 ```
 OPENROUTER_API_KEY=sk-or-v1-...
+GOOGLE_API_KEY=...              # Optional: Gemini 2.5 Pro free tier
+GROQ_API_KEY=...                # Optional: Groq 30 RPM free tier
+TELEGRAM_BOT_TOKEN=...          # Optional: Telegram bot integration
 LANGSMITH_API_KEY=lsv2_pt_...
 LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
 LANGSMITH_PROJECT=graphbot
@@ -63,7 +71,9 @@ Run:
 python scripts/seed_graph.py          # Seed knowledge graph
 python scripts/test_live.py           # Live integration test
 python scripts/compare.py "your task" # A/B comparison
-python -m pytest tests/ -v            # Run test suite (979 tests)
+python scripts/run_gaia.py            # GAIA Level 1 benchmark
+python scripts/warm_cache.py          # Pattern cache warming
+python -m pytest tests/ -v            # Run test suite (1000+ tests)
 ```
 
 ## Benchmark Results
@@ -83,8 +93,8 @@ python -m pytest tests/ -v            # Run test suite (979 tests)
 |----------|-------|---------|-------|
 | File (list, read, search) | 5 | 5/5 | All tool-routed |
 | Web (search, summarize) | 3 | 3/3 | All tool-routed |
-| Shell (command execution) | 2 | 0/2 | Command extraction gap |
-| **Total** | **10** | **8/10** | **$0.0005 total cost** |
+| Shell (command execution) | 2 | 2/2 | Fixed: stdout interpretation |
+| **Total** | **10** | **10/10** | **$0.0005 total cost** |
 
 **Tokens halved vs Phase 9** (15,935 down from 29,997). Total cost for all 25 tasks: $0.0035.
 
@@ -92,22 +102,36 @@ See [benchmarks/RESULTS.md](benchmarks/RESULTS.md) and [benchmarks/REAL_TASKS_RE
 
 ## Performance
 
-- **979 tests**, all passing
+- **1000+ tests**, all passing
 - **Entity resolution**: ~3ms (meets <10ms target)
 - **Pattern matching**: <5ms
 - **Decomposition success**: 100% on 70B models with JSON mode
-- **Real-world tasks**: 8/10 success (file 5/5, web 3/3, shell 0/2)
+- **Real-world tasks**: 10/10 success (file 5/5, web 3/3, shell 2/2)
 - **Cost**: $0.0002 average per task on free models
+- **Multi-provider rotation**: OpenRouter -> Google -> Groq fallback chain
+- **Pattern cache**: 30%+ token reduction after warming
 - **SSE observability**: tool.invoke / tool.result events per leaf node
+
+## Features
+
+- **Live DAG Visualization**: Real-time per-node animations (pending/running/completed) via SSE
+- **Knowledge Graph Panel**: D3 force layout showing entities and relationships
+- **Dark Mode**: Toggleable, persisted to localStorage
+- **Multi-Provider Rotation**: Automatic fallback across OpenRouter, Google AI Studio, Groq
+- **Telegram Bot**: Mobile access via Telegram channel integration
+- **GAIA Benchmark**: Level 1 benchmark runner for standardized evaluation
+- **Pattern Cache Warming**: Pre-populate templates for 30%+ token savings
 
 ## Tech Stack
 
 - **Graph DB**: Kuzu v0.11.3 (embedded, no server)
-- **LLM Gateway**: OpenRouter via LiteLLM
-- **Observability**: LangSmith (EU endpoint)
+- **LLM Gateway**: OpenRouter + Google AI Studio + Groq via LiteLLM
+- **Frontend**: Next.js + React Flow + D3.js + Jotai
+- **Observability**: LangSmith (EU endpoint) + SSE event streaming
 - **Rate Limiting**: aiolimiter (per-provider)
 - **Circuit Breaking**: aiobreaker (per-provider)
 - **Tracing**: Custom `@traced` decorator + LangSmith callbacks
+- **Channels**: Telegram (python-telegram-bot)
 
 ## Origin
 

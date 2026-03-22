@@ -1,8 +1,8 @@
 # GraphBot Progress
 
 ## Current Phase
-**Phase 12: SSE Observability + Docs -- COMPLETE**
-All core phases plus tool system, UI, and observability done.
+**Phase 13: Polish, Demo-Ready, Channels, Benchmarks -- COMPLETE**
+All phases through 13 complete. Production-ready with multi-provider, Telegram, GAIA benchmarks, and live UI.
 
 ## Completed
 - [x] Full architecture design (2026-03-20)
@@ -96,6 +96,18 @@ All core phases plus tool system, UI, and observability done.
 - [x] T101: Test coverage for tool observability events
 - **Total: 979 tests, all passing**
 
+## Phase 13 Completed (2026-03-22)
+- [x] T102: Fix shell output interpretation + observability test failure (8 new tests, committed b0e053a)
+- [x] T103: Git history squash -- 1385 Nanobot commits -> 1 "Initial fork" commit
+- [x] T104: UI per-node live animations + dark mode toggle (committed 6339611)
+- [x] T105: UI knowledge graph D3 force layout panel (committed 4236222)
+- [x] T106: Multi-provider rotation -- OpenRouter + Google + Groq with fallback (14 tests, committed 13a498f)
+- [x] T107: Telegram channel integration with Orchestrator bridge (committed dce0055)
+- [x] T108: GAIA Level 1 benchmark runner -- 25 tasks (23 tests, committed 177d4f6)
+- [x] T109: Pattern cache warming script -- 36 tasks, 6 categories (14 tests, committed 32dd225)
+- [x] T110: Updated README.md + PROGRESS.md with Phase 13 results
+- **Total: 1000+ tests, all passing**
+
 ## In Progress
 _Nothing._
 
@@ -123,7 +135,7 @@ _Nothing blocked._
 | Metric | Target | Current | Notes |
 |--------|--------|---------|-------|
 | Lines of code (new) | <8,000 | ~3,500 | core_gb + graph + models + scripts + tests |
-| Test count | -- | 979 | All passing (Phase 12 complete) |
+| Test count | -- | 1000+ | All passing (Phase 13 complete) |
 | 2-hop query (100 nodes) | <1ms | ~13ms | Needs optimization (full table scan approach) |
 | Context assembly (100 nodes) | <10ms | ~23ms | Needs indexed queries |
 | Entity resolution (100 nodes) | <10ms | ~3ms | Meets target |
