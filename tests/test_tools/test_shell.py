@@ -98,3 +98,62 @@ async def test_workspace_cwd(tmp_path):
     reported = os.path.normcase(os.path.realpath(result["stdout"].strip()))
     expected = os.path.normcase(os.path.realpath(str(tmp_path)))
     assert reported == expected
+
+
+@pytest.mark.asyncio
+async def test_run_returns_answer_field(shell):
+    """Shell run results include an interpreted 'answer' field."""
+    result = await shell.run("echo hello world")
+    assert "answer" in result
+    assert "hello world" in result["answer"]
+
+
+class TestInterpretOutput:
+    """Unit tests for ShellTool.interpret_output."""
+
+    def test_failed_command(self):
+        answer = ShellTool.interpret_output("bad_cmd", "", "not found", 127)
+        assert "failed" in answer.lower()
+        assert "127" in answer
+
+    def test_empty_stdout(self):
+        answer = ShellTool.interpret_output("true", "", "", 0)
+        assert "no output" in answer.lower()
+
+    def test_short_output_returned_verbatim(self):
+        stdout = "line1\nline2\nline3"
+        answer = ShellTool.interpret_output("echo hi", stdout, "", 0)
+        assert "line1" in answer
+        assert "line2" in answer
+        assert "line3" in answer
+
+    def test_long_output_truncated(self):
+        lines = [f"line{i}" for i in range(50)]
+        stdout = "\n".join(lines)
+        answer = ShellTool.interpret_output("some_cmd", stdout, "", 0)
+        assert "50 total lines" in answer
+        assert "line0" in answer   # head
+        assert "line49" in answer  # tail
+
+    def test_pytest_collect_output(self):
+        stdout = "tests/test_a.py::test_1\ntests/test_a.py::test_2\n3 tests collected"
+        answer = ShellTool.interpret_output(
+            "python -m pytest tests/ --co -q", stdout, "", 0,
+        )
+        assert "3 tests collected" in answer
+
+    def test_pytest_collect_fallback_counts_lines(self):
+        stdout = "tests/test_a.py::test_1\ntests/test_b.py::test_2"
+        answer = ShellTool.interpret_output(
+            "python -m pytest --co -q tests/", stdout, "", 0,
+        )
+        assert "2 tests collected" in answer
+
+    def test_git_log_output(self):
+        stdout = "abc1234 first commit\ndef5678 second commit"
+        answer = ShellTool.interpret_output(
+            "git log --oneline -2", stdout, "", 0,
+        )
+        assert "2 commits" in answer
+        assert "first commit" in answer
+        assert "second commit" in answer

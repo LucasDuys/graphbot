@@ -12,8 +12,14 @@ from models.observability import setup_langsmith
 
 @pytest.fixture(autouse=True)
 def _clean_litellm_callbacks():
-    """Save and restore litellm.success_callback around each test."""
+    """Save and restore litellm.success_callback around each test.
+
+    We clear the list before each test because module-level imports
+    (models/__init__.py calls setup_langsmith()) may have already
+    added 'langsmith' to the callback list.
+    """
     original = litellm.success_callback[:]
+    litellm.success_callback.clear()
     yield
     litellm.success_callback[:] = original
 

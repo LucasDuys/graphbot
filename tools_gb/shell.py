@@ -96,6 +96,7 @@ class ShellTool:
                 "stdout": stdout,
                 "stderr": stderr,
                 "exit_code": exit_code,
+                "answer": self.interpret_output(command, stdout, stderr, exit_code),
             }
 
         except Exception as exc:
@@ -125,6 +126,51 @@ class ShellTool:
         for key in to_remove:
             del env[key]
         return env
+
+    @staticmethod
+    def interpret_output(
+        command: str, stdout: str, stderr: str, exit_code: int,
+    ) -> str:
+        """Parse shell stdout into a meaningful answer string.
+
+        Extracts summary lines, counts, and key information from raw output
+        so downstream nodes and the final aggregation receive a concise answer
+        rather than raw terminal text.
+        """
+        if exit_code != 0:
+            error_text = stderr.strip() or stdout.strip() or "unknown error"
+            return f"Command failed (exit {exit_code}): {error_text}"
+
+        lines = [ln for ln in stdout.strip().splitlines() if ln.strip()]
+        if not lines:
+            return "Command completed successfully with no output."
+
+        # pytest --co -q: last line is "N tests collected" or "N items"
+        if "pytest" in command and ("--co" in command or "--collect-only" in command):
+            for line in reversed(lines):
+                if re.search(r"\d+\s+test", line, re.IGNORECASE):
+                    return line.strip()
+            # Fallback: count non-empty lines (each is a test id)
+            test_lines = [ln for ln in lines if "::" in ln or "test_" in ln.lower()]
+            if test_lines:
+                return f"{len(test_lines)} tests collected"
+
+        # git log: return all lines as-is (each is a commit summary)
+        if "git log" in command:
+            return f"{len(lines)} commits:\n" + "\n".join(lines)
+
+        # Generic: if output is short (<=10 lines), return it all
+        if len(lines) <= 10:
+            return "\n".join(lines)
+
+        # Longer output: return first 5 lines, count, and last 3 lines
+        head = "\n".join(lines[:5])
+        tail = "\n".join(lines[-3:])
+        return (
+            f"{head}\n"
+            f"... ({len(lines)} total lines) ...\n"
+            f"{tail}"
+        )
 
     def _clean_output(self, text: str) -> str:
         text = ANSI_ESCAPE.sub("", text)

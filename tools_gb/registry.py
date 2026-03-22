@@ -71,6 +71,7 @@ class ToolRegistry:
             elapsed = (time.perf_counter() - start) * 1000
             output = (
                 result_data.get("content", "")
+                or result_data.get("answer", "")
                 or result_data.get("stdout", "")
                 or json.dumps(result_data)
             )
@@ -142,6 +143,7 @@ class ToolRegistry:
             elapsed = (time.perf_counter() - start) * 1000
             output = (
                 result_data.get("content", "")
+                or result_data.get("answer", "")
                 or result_data.get("stdout", "")
                 or json.dumps(result_data)
             )
