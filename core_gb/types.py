@@ -31,6 +31,7 @@ class Domain(str, Enum):
     FILE = "file"
     WEB = "web"
     CODE = "code"
+    BROWSER = "browser"
     COMMS = "comms"
     SYSTEM = "system"
     SYNTHESIS = "synthesis"

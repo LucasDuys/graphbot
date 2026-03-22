@@ -2,19 +2,56 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from core_gb.types import Domain, ExecutionResult, TaskNode
+from tools_gb.browser import BrowserTool
 from tools_gb.file import FileTool
 from tools_gb.shell import ShellTool
 from tools_gb.web import WebTool
 
 logger = logging.getLogger(__name__)
+
+# Minimum success rate before a tool is flagged as degraded.
+_DEGRADED_THRESHOLD: float = 0.5
+
+
+@dataclass
+class ToolStats:
+    """Per-tool quality statistics tracked across executions."""
+
+    success_count: int = 0
+    failure_count: int = 0
+    avg_latency_ms: float = 0.0
+
+    @property
+    def total_count(self) -> int:
+        """Total number of executions (success + failure)."""
+        return self.success_count + self.failure_count
+
+    @property
+    def success_rate(self) -> float:
+        """Fraction of executions that succeeded (0.0 to 1.0)."""
+        if self.total_count == 0:
+            return 0.0
+        return self.success_count / self.total_count
+
+    @property
+    def is_degraded(self) -> bool:
+        """True when success rate drops below the degraded threshold.
+
+        Tools with zero executions are not considered degraded.
+        """
+        if self.total_count == 0:
+            return False
+        return self.success_rate < _DEGRADED_THRESHOLD
 
 
 class ToolRegistry:
@@ -24,11 +61,14 @@ class ToolRegistry:
         self._web = WebTool()
         self._file = FileTool(workspace=workspace)
         self._shell = ShellTool(workspace=workspace)
+        self._browser = BrowserTool()
         self._domain_map: dict[Domain, Any] = {
             Domain.WEB: self._web,
             Domain.FILE: self._file,
             Domain.CODE: self._shell,
+            Domain.BROWSER: self._browser,
         }
+        self._stats: dict[str, ToolStats] = {}
         self._code_agent: Any | None = None
         if router is not None:
             from core_gb.code_agent import CodeEditAgent
@@ -37,6 +77,82 @@ class ToolRegistry:
     def has_tool(self, domain: Domain) -> bool:
         """Check if a domain has a registered tool."""
         return domain in self._domain_map
+
+    # -- Quality tracking ----------------------------------------------------
+
+    def _record_stat(self, tool_key: str, success: bool, latency_ms: float) -> None:
+        """Record the outcome of a single tool execution.
+
+        Updates success/failure counts and recalculates the running average
+        latency.  If the tool's success rate drops below the degraded
+        threshold, a warning is logged.
+        """
+        if tool_key not in self._stats:
+            self._stats[tool_key] = ToolStats()
+
+        stats = self._stats[tool_key]
+        if success:
+            stats.success_count += 1
+        else:
+            stats.failure_count += 1
+
+        # Running average: avg = ((avg * (n-1)) + new) / n
+        n = stats.total_count
+        stats.avg_latency_ms = (
+            (stats.avg_latency_ms * (n - 1) + latency_ms) / n
+        )
+
+        if stats.is_degraded:
+            logger.warning(
+                "Tool '%s' has a low success rate: %.0f%% (%d/%d executions)",
+                tool_key,
+                stats.success_rate * 100,
+                stats.success_count,
+                stats.total_count,
+            )
+
+    def get_stats(self) -> dict[str, ToolStats]:
+        """Return a copy of all tool quality statistics.
+
+        The returned dict is a shallow copy -- callers can mutate it without
+        affecting the registry's internal state.  The ToolStats values are
+        copied via ``copy.copy`` to ensure isolation.
+        """
+        return {k: copy.copy(v) for k, v in self._stats.items()}
+
+    def check_tool_stats(self, report: Any) -> None:
+        """Append tool quality results to a HealthReport.
+
+        Meant to be called from the healthcheck script.  Each tracked tool
+        produces one result entry.  Degraded tools are flagged as failures
+        (non-critical).
+        """
+        from scripts.healthcheck import CheckResult
+
+        stats = self.get_stats()
+        if not stats:
+            report.add(CheckResult(
+                name="Tool quality stats",
+                passed=True,
+                message="No tool executions recorded yet",
+                critical=False,
+            ))
+            return
+
+        for tool_key, ts in stats.items():
+            passed = not ts.is_degraded
+            report.add(CheckResult(
+                name=f"Tool quality: {tool_key}",
+                passed=passed,
+                message=(
+                    f"{tool_key} success rate {ts.success_rate:.0%} "
+                    f"({ts.success_count}/{ts.total_count} executions, "
+                    f"avg latency {ts.avg_latency_ms:.1f}ms)"
+                ),
+                critical=False,
+            ))
+
+    # -- Execution -----------------------------------------------------------
 
     async def execute(self, node: TaskNode) -> ExecutionResult:
         """Execute a leaf node using the appropriate tool.
@@ -65,8 +181,13 @@ class ToolRegistry:
                     return agent_result
             elif domain == Domain.CODE:
                 result_data = await self._execute_shell(node)
+            elif domain == Domain.BROWSER:
+                result_data = await self._execute_browser(node)
             else:
-                return self._no_tool_result(node, start)
+                result = self._no_tool_result(node, start)
+                elapsed = result.total_latency_ms
+                self._record_stat(domain.value, False, elapsed)
+                return result
 
             elapsed = (time.perf_counter() - start) * 1000
             output = (
@@ -80,6 +201,8 @@ class ToolRegistry:
             errors: tuple[str, ...] = ()
             if result_data.get("error"):
                 errors = (result_data["error"],)
+
+            self._record_stat(domain.value, success, elapsed)
 
             return ExecutionResult(
                 root_id=node.id,
@@ -95,6 +218,7 @@ class ToolRegistry:
         except Exception as exc:
             elapsed = (time.perf_counter() - start) * 1000
             logger.error("Tool execution failed for node %s: %s", node.id, exc)
+            self._record_stat(domain.value, False, elapsed)
             return ExecutionResult(
                 root_id=node.id,
                 output="",
@@ -135,6 +259,22 @@ class ToolRegistry:
                 if not command:
                     command = self._extract_command(node.description)
                 result_data = await self._shell.run(command)
+            elif method == "browser_navigate":
+                result_data = await self._browser.navigate(params.get("url", ""))
+            elif method == "browser_extract_text":
+                result_data = await self._browser.extract_text(
+                    params.get("selector", "body")
+                )
+            elif method == "browser_screenshot":
+                result_data = await self._browser.screenshot(
+                    params.get("path")
+                )
+            elif method == "browser_click":
+                result_data = await self._browser.click(params.get("selector", ""))
+            elif method == "browser_fill":
+                result_data = await self._browser.fill(
+                    params.get("selector", ""), params.get("value", "")
+                )
             elif method == "llm_reason":
                 return None
             else:
@@ -152,6 +292,8 @@ class ToolRegistry:
             if result_data.get("error"):
                 errors = (result_data["error"],)
 
+            self._record_stat(method, success, elapsed)
+
             return ExecutionResult(
                 root_id=node.id,
                 output=output,
@@ -166,6 +308,7 @@ class ToolRegistry:
         except Exception as exc:
             elapsed = (time.perf_counter() - start) * 1000
             logger.error("Tool method %s failed for node %s: %s", method, node.id, exc)
+            self._record_stat(method, False, elapsed)
             return ExecutionResult(
                 root_id=node.id,
                 output="",
@@ -234,6 +377,43 @@ class ToolRegistry:
         # Extract command from description
         command = self._extract_command(node.description)
         return await self._shell.run(command)
+
+    async def _execute_browser(self, node: TaskNode) -> dict[str, Any]:
+        """Route browser tasks to appropriate BrowserTool method.
+
+        Parses the task description to determine the browser action:
+        - URLs trigger navigate + extract_text
+        - 'click' keyword triggers click
+        - 'fill'/'type' keyword triggers fill
+        - 'screenshot' keyword triggers screenshot
+        - Default: navigate to URL if found, then extract text
+        """
+        desc = node.description.lower()
+        url_match = re.search(r"https?://[^\s]+", node.description)
+
+        if any(kw in desc for kw in ["screenshot", "capture"]):
+            if url_match:
+                await self._browser.navigate(url_match.group())
+            return await self._browser.screenshot()
+        elif any(kw in desc for kw in ["click"]):
+            selector_match = re.search(r"['\"`]([^'\"`]+)['\"`]", node.description)
+            selector = selector_match.group(1) if selector_match else "body"
+            return await self._browser.click(selector)
+        elif any(kw in desc for kw in ["fill", "type", "enter"]):
+            selector_match = re.search(r"['\"`]([^'\"`]+)['\"`]", node.description)
+            selector = selector_match.group(1) if selector_match else "input"
+            value_match = re.search(
+                r"(?:with|value)\s+['\"`]([^'\"`]+)['\"`]", node.description
+            )
+            value = value_match.group(1) if value_match else ""
+            return await self._browser.fill(selector, value)
+        elif url_match:
+            nav_result = await self._browser.navigate(url_match.group())
+            if not nav_result.get("success"):
+                return nav_result
+            return await self._browser.extract_text()
+        else:
+            return await self._browser.extract_text()
 
     @staticmethod
     def _extract_command(description: str) -> str:
