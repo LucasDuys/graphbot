@@ -14,13 +14,19 @@ Risk assignment priority:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from core_gb.types import Domain, TaskNode
+
+if TYPE_CHECKING:
+    from models.router import ModelRouter
 
 logger = logging.getLogger(__name__)
 
@@ -239,3 +245,233 @@ class RiskScorer:
             return hostname in _BROWSER_DOMAIN_ALLOWLIST or bare in _BROWSER_DOMAIN_ALLOWLIST
         except Exception:
             return False
+
+
+# ---------------------------------------------------------------------------
+# Multi-model cross-validation for high-risk plans
+# ---------------------------------------------------------------------------
+
+# Complexity levels used to select different models for cross-validation.
+# Using levels 3 (mid-tier) and 5 (top-tier) ensures two distinct models
+# review the plan, providing genuine independent validation.
+_CROSS_VALIDATION_COMPLEXITY_A: int = 3
+_CROSS_VALIDATION_COMPLEXITY_B: int = 5
+
+_CROSS_VALIDATION_SYSTEM_PROMPT: str = (
+    "You are a safety reviewer for an AI task execution engine. "
+    "You will be given a plan consisting of one or more task nodes. "
+    "Each node has a description, domain, and risk level. "
+    "Evaluate whether this plan is safe to execute autonomously.\n\n"
+    "Respond with ONLY valid JSON in this exact format:\n"
+    '{"safe": true, "reason": "brief explanation"}\n'
+    "or\n"
+    '{"safe": false, "reason": "brief explanation of why it is unsafe"}\n\n'
+    "A plan is UNSAFE if it could cause data loss, system damage, "
+    "unauthorized access, privacy violations, or other harm. "
+    "Be conservative: when in doubt, mark as unsafe."
+)
+
+
+@dataclass(frozen=True)
+class CrossValidationResult:
+    """Result of multi-model cross-validation for a high-risk plan.
+
+    Attributes:
+        approved: Whether the plan passed cross-validation (both models agree safe).
+        risk_level: The highest risk level found across all nodes in the plan.
+        model_a_response: Raw response content from the first model.
+        model_b_response: Raw response content from the second model.
+        explanation: Human-readable summary of the cross-validation outcome.
+    """
+
+    approved: bool
+    risk_level: RiskLevel
+    model_a_response: str = ""
+    model_b_response: str = ""
+    explanation: str = ""
+
+
+class CrossValidator:
+    """Multi-model cross-validation for high-risk execution plans.
+
+    For plans where the highest node risk is HIGH, queries two different
+    models (selected via different complexity levels through ModelRouter)
+    to independently evaluate plan safety. Both models must agree the plan
+    is safe for execution to proceed.
+
+    Plans with risk level below HIGH are approved without model calls.
+    On any error (network, JSON parse, missing fields), the validator
+    defaults to blocking (fail-safe).
+    """
+
+    def __init__(self, scorer: RiskScorer, router: ModelRouter) -> None:
+        self._scorer = scorer
+        self._router = router
+
+    async def validate_plan(self, nodes: list[TaskNode]) -> CrossValidationResult:
+        """Validate a plan through multi-model cross-validation.
+
+        Only triggers for plans where the maximum risk level across all
+        nodes is HIGH. Lower-risk plans are approved immediately.
+
+        Args:
+            nodes: The list of TaskNodes forming the execution plan.
+
+        Returns:
+            CrossValidationResult indicating whether the plan is approved.
+        """
+        if not nodes:
+            return CrossValidationResult(
+                approved=True,
+                risk_level=RiskLevel.LOW,
+                explanation="Empty plan trivially approved.",
+            )
+
+        # Determine the highest risk level across all nodes.
+        max_risk = self._compute_max_risk(nodes)
+
+        # Only cross-validate HIGH risk plans.
+        if max_risk != RiskLevel.HIGH:
+            return CrossValidationResult(
+                approved=True,
+                risk_level=max_risk,
+                explanation=f"Plan risk level is {max_risk.value}; cross-validation not required.",
+            )
+
+        # Build the validation prompt describing the plan.
+        messages = self._build_validation_messages(nodes)
+
+        # Query two different models via different complexity levels.
+        model_a_response = await self._query_model(
+            messages, _CROSS_VALIDATION_COMPLEXITY_A
+        )
+        model_b_response = await self._query_model(
+            messages, _CROSS_VALIDATION_COMPLEXITY_B
+        )
+
+        # Parse responses and determine outcome.
+        return self._evaluate_responses(model_a_response, model_b_response, max_risk)
+
+    def _compute_max_risk(self, nodes: list[TaskNode]) -> RiskLevel:
+        """Compute the highest risk level across all nodes in the plan."""
+        max_order = 0
+        max_risk = RiskLevel.LOW
+        for node in nodes:
+            risk = self._scorer.score_node(node)
+            order = _RISK_ORDER[risk]
+            if order > max_order:
+                max_order = order
+                max_risk = risk
+        return max_risk
+
+    def _build_validation_messages(self, nodes: list[TaskNode]) -> list[dict[str, str]]:
+        """Build the LLM prompt messages for plan validation."""
+        plan_description_parts: list[str] = []
+        for node in nodes:
+            risk = self._scorer.score_node(node)
+            plan_description_parts.append(
+                f"- Node '{node.id}': {node.description} "
+                f"[domain={node.domain.value}, risk={risk.value}]"
+            )
+
+        plan_text = "\n".join(plan_description_parts)
+        user_content = (
+            f"Evaluate the safety of this execution plan:\n\n{plan_text}"
+        )
+
+        return [
+            {"role": "system", "content": _CROSS_VALIDATION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+
+    async def _query_model(
+        self, messages: list[dict[str, str]], complexity: int
+    ) -> str:
+        """Query a model at the specified complexity level for plan validation.
+
+        Returns the raw response content, or an error marker string on failure.
+        """
+        from core_gb.types import TaskNode as _TN
+
+        route_node = _TN(
+            id="_cross_validate",
+            description="cross-validation safety review",
+            complexity=complexity,
+        )
+        try:
+            result = await self._router.route(
+                route_node, messages,
+                response_format={"type": "json_object"},
+            )
+            return result.content
+        except Exception as exc:
+            logger.warning(
+                "Cross-validation model query failed (complexity=%d): %s",
+                complexity, exc,
+            )
+            return f'{{"error": "{exc}"}}'
+
+    def _evaluate_responses(
+        self,
+        response_a: str,
+        response_b: str,
+        risk_level: RiskLevel,
+    ) -> CrossValidationResult:
+        """Parse both model responses and determine approval or block.
+
+        Both models must return {"safe": true} for approval. Any error in
+        parsing or a missing "safe" field is treated as unsafe (fail-safe).
+        """
+        safe_a, reason_a = self._parse_safety_response(response_a)
+        safe_b, reason_b = self._parse_safety_response(response_b)
+
+        if safe_a and safe_b:
+            return CrossValidationResult(
+                approved=True,
+                risk_level=risk_level,
+                model_a_response=response_a,
+                model_b_response=response_b,
+                explanation="Both models agree the plan is safe. Approved for execution.",
+            )
+
+        # Build explanation with details about which model(s) flagged the plan.
+        disagreement_parts: list[str] = []
+        if not safe_a:
+            disagreement_parts.append(f"Model A (complexity {_CROSS_VALIDATION_COMPLEXITY_A}): {reason_a}")
+        if not safe_b:
+            disagreement_parts.append(f"Model B (complexity {_CROSS_VALIDATION_COMPLEXITY_B}): {reason_b}")
+
+        explanation = (
+            "Models disagree on plan safety. Execution blocked. "
+            + " | ".join(disagreement_parts)
+        )
+
+        return CrossValidationResult(
+            approved=False,
+            risk_level=risk_level,
+            model_a_response=response_a,
+            model_b_response=response_b,
+            explanation=explanation,
+        )
+
+    @staticmethod
+    def _parse_safety_response(response: str) -> tuple[bool, str]:
+        """Parse a model's safety review response.
+
+        Returns (is_safe, reason). On parse failure, returns (False, error_message)
+        to enforce fail-safe behaviour.
+        """
+        try:
+            data = json.loads(response)
+        except (json.JSONDecodeError, TypeError):
+            return False, f"Failed to parse response as JSON: {response[:200]}"
+
+        if "error" in data:
+            return False, f"Model returned error: {data['error']}"
+
+        if "safe" not in data:
+            return False, "Response missing 'safe' field"
+
+        is_safe = bool(data["safe"])
+        reason = str(data.get("reason", ""))
+        return is_safe, reason

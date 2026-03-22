@@ -20,6 +20,7 @@ from core_gb.wave_event import WaveCompleteEvent
 import re
 
 from core_gb.aggregator import Aggregator
+from core_gb.autonomy import AutonomyLevel, RiskScorer
 from core_gb.sanitizer import OutputSanitizer
 from core_gb.types import ConditionalNode, ExecutionResult, LoopNode, TaskNode, TaskStatus
 from core_gb.verification import (
@@ -48,6 +49,8 @@ class DAGExecutor:
         router: ModelRouter | None = None,
         on_wave_complete: list[Callable[[WaveCompleteEvent], None]] | None = None,
         max_expansion_depth: int = 2,
+        risk_scorer: RiskScorer | None = None,
+        autonomy_level: AutonomyLevel | None = None,
     ) -> None:
         self._executor = executor
         self._semaphore = asyncio.Semaphore(max_concurrency)
@@ -76,6 +79,11 @@ class DAGExecutor:
         self._on_replan: (
             Callable[[WaveCompleteEvent], Awaitable[list[TaskNode] | None]] | None
         ) = None
+        # Per-action autonomy enforcement. When both a RiskScorer and an
+        # AutonomyLevel are provided, each node is scored before execution
+        # and blocked if its risk exceeds the autonomy ceiling.
+        self._risk_scorer: RiskScorer | None = risk_scorer
+        self._autonomy_level: AutonomyLevel | None = autonomy_level
 
     def set_replan_callback(
         self,
@@ -961,7 +969,38 @@ class DAGExecutor:
         node: TaskNode,
         data_snapshot: dict[str, str],
     ) -> tuple[str, ExecutionResult]:
-        """Execute a single node, injecting forwarded data into the task description."""
+        """Execute a single node, injecting forwarded data into the task description.
+
+        Before execution, checks per-action autonomy policy. If a RiskScorer
+        and AutonomyLevel are configured, the node's risk is scored and
+        compared against the autonomy ceiling. Nodes exceeding the ceiling
+        are blocked with a failed ExecutionResult.
+        """
+        # Per-action autonomy enforcement: score risk and block if not allowed
+        if self._risk_scorer is not None and self._autonomy_level is not None:
+            if not self._risk_scorer.is_allowed(node, self._autonomy_level):
+                risk = self._risk_scorer.score_node(node)
+                logger.info(
+                    "Node '%s' blocked by autonomy policy: risk=%s, "
+                    "autonomy_level=%s",
+                    node.id,
+                    risk.value,
+                    self._autonomy_level.value,
+                )
+                return node.id, ExecutionResult(
+                    root_id=node.id,
+                    output="Action blocked by autonomy policy",
+                    success=False,
+                    total_nodes=1,
+                    total_tokens=0,
+                    total_latency_ms=0.0,
+                    total_cost=0.0,
+                    errors=(
+                        f"Node '{node.id}' blocked: risk={risk.value}, "
+                        f"autonomy_level={self._autonomy_level.value}",
+                    ),
+                )
+
         async with self._semaphore:
             task_text = node.description
 

@@ -8,6 +8,7 @@ import uuid
 
 import pytest
 
+from core_gb.autonomy import AutonomyLevel, RiskScorer
 from core_gb.dag_executor import DAGExecutor
 from core_gb.types import (
     Domain,
@@ -278,3 +279,283 @@ class TestConcurrencyLimit:
         assert len(mock.call_order) == 3
         # With concurrency=1 and 0.05s delay, should take at least 0.15s
         assert elapsed >= 0.12, f"Expected sequential execution, got {elapsed:.3f}s"
+
+
+# ---------------------------------------------------------------------------
+# Per-action autonomy enforcement (T171)
+# ---------------------------------------------------------------------------
+
+def _make_leaf_with_tool(
+    node_id: str,
+    description: str,
+    domain: Domain = Domain.SYNTHESIS,
+    tool_method: str | None = None,
+    requires: list[str] | None = None,
+    provides: list[str] | None = None,
+    consumes: list[str] | None = None,
+) -> TaskNode:
+    """Helper to create an atomic leaf TaskNode with tool_method for autonomy tests."""
+    return TaskNode(
+        id=node_id,
+        description=description,
+        is_atomic=True,
+        domain=domain,
+        complexity=1,
+        status=TaskStatus.READY,
+        requires=requires or [],
+        provides=provides or [],
+        consumes=consumes or [],
+        tool_method=tool_method,
+    )
+
+
+class TestAutonomyEnforcementSupervised:
+    """SUPERVISED mode: blocks both HIGH and MEDIUM risk nodes."""
+
+    async def test_high_risk_blocked_in_supervised(self) -> None:
+        """A HIGH-risk node (shell_run) is blocked under SUPERVISED autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.SUPERVISED,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("high", "Run shell command", tool_method="shell_run"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is False
+        assert "Action blocked by autonomy policy" in result.output
+        # The executor should NOT have been called for the blocked node
+        assert len(mock.call_order) == 0
+
+    async def test_medium_risk_blocked_in_supervised(self) -> None:
+        """A MEDIUM-risk node (web_search) is blocked under SUPERVISED autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.SUPERVISED,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("med", "Search the web", tool_method="web_search"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is False
+        assert "Action blocked by autonomy policy" in result.output
+        assert len(mock.call_order) == 0
+
+    async def test_low_risk_allowed_in_supervised(self) -> None:
+        """A LOW-risk node (file_read) executes normally under SUPERVISED autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.SUPERVISED,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("low", "Read a file", tool_method="file_read"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is True
+        assert "Result: Read a file" in result.output
+        assert len(mock.call_order) == 1
+
+    async def test_mixed_dag_supervised_blocks_risky_nodes(self) -> None:
+        """In a mixed DAG, only LOW-risk nodes execute under SUPERVISED."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.SUPERVISED,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("low", "Read a file", tool_method="file_read"),
+            _make_leaf_with_tool("med", "Search web", tool_method="web_search"),
+            _make_leaf_with_tool("high", "Run shell", tool_method="shell_run"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        # Overall fails because some nodes were blocked
+        assert result.success is False
+        # Only the low-risk node was actually executed
+        assert "Read a file" in mock.call_order
+        assert len(mock.call_order) == 1
+
+
+class TestAutonomyEnforcementStandard:
+    """STANDARD mode: blocks HIGH risk only, allows LOW and MEDIUM."""
+
+    async def test_high_risk_blocked_in_standard(self) -> None:
+        """A HIGH-risk node (shell_run) is blocked under STANDARD autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.STANDARD,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("high", "Run shell command", tool_method="shell_run"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is False
+        assert "Action blocked by autonomy policy" in result.output
+        assert len(mock.call_order) == 0
+
+    async def test_medium_risk_allowed_in_standard(self) -> None:
+        """A MEDIUM-risk node (web_search) executes normally under STANDARD autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.STANDARD,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("med", "Search the web", tool_method="web_search"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is True
+        assert "Result: Search the web" in result.output
+        assert len(mock.call_order) == 1
+
+    async def test_low_risk_allowed_in_standard(self) -> None:
+        """A LOW-risk node (file_read) executes normally under STANDARD autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.STANDARD,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("low", "Read a file", tool_method="file_read"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is True
+        assert "Result: Read a file" in result.output
+        assert len(mock.call_order) == 1
+
+
+class TestAutonomyEnforcementAutonomous:
+    """AUTONOMOUS mode: allows all risk levels including HIGH."""
+
+    async def test_high_risk_allowed_in_autonomous(self) -> None:
+        """A HIGH-risk node (shell_run) executes normally under AUTONOMOUS autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.AUTONOMOUS,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("high", "Run shell command", tool_method="shell_run"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is True
+        assert "Result: Run shell command" in result.output
+        assert len(mock.call_order) == 1
+
+    async def test_all_risk_levels_allowed_in_autonomous(self) -> None:
+        """All risk levels execute under AUTONOMOUS autonomy."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.AUTONOMOUS,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("low", "Read a file", tool_method="file_read"),
+            _make_leaf_with_tool("med", "Search web", tool_method="web_search"),
+            _make_leaf_with_tool("high", "Run shell", tool_method="shell_run"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is True
+        assert len(mock.call_order) == 3
+
+
+class TestAutonomyEnforcementDefault:
+    """When no scorer/autonomy is provided, all nodes execute (backward compat)."""
+
+    async def test_no_autonomy_config_allows_all(self) -> None:
+        """Without risk_scorer/autonomy_level, executor behaves as before."""
+        mock = MockSimpleExecutor(delay=0.0)
+        dag = DAGExecutor(executor=mock, max_concurrency=10)
+
+        nodes = [
+            _make_leaf_with_tool("high", "Run shell command", tool_method="shell_run"),
+            _make_leaf_with_tool("med", "Search web", tool_method="web_search"),
+            _make_leaf_with_tool("low", "Read a file", tool_method="file_read"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is True
+        assert len(mock.call_order) == 3
+
+
+class TestAutonomyBlockedResultFormat:
+    """Blocked nodes produce correctly formatted ExecutionResult."""
+
+    async def test_blocked_result_has_correct_fields(self) -> None:
+        """Blocked node result has success=False and the standard blocked message."""
+        mock = MockSimpleExecutor(delay=0.0)
+        scorer = RiskScorer()
+        dag = DAGExecutor(
+            executor=mock,
+            max_concurrency=10,
+            risk_scorer=scorer,
+            autonomy_level=AutonomyLevel.SUPERVISED,
+        )
+
+        nodes = [
+            _make_leaf_with_tool("high", "Run shell command", tool_method="shell_run"),
+        ]
+
+        result = await dag.execute(nodes)
+
+        assert result.success is False
+        assert result.output == "Action blocked by autonomy policy"
+        assert result.total_nodes == 1
