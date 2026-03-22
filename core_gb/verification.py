@@ -15,6 +15,12 @@ Layer 2 (VerificationLayer2): Self-consistency via 3-way sampling.
     Only runs on nodes with complexity >= configurable threshold (default 3).
     Cost bound: max 3x overhead (no retries within sampling).
     Fallback: all 3 disagree -> return first with low_confidence=True.
+
+Layer 3 (VerificationLayer3): CRITIC-style knowledge graph verification.
+    Extracts entities from LLM output using EntityResolver, checks claimed
+    relationships and properties against the knowledge graph, and revises
+    the output via re-prompt with graph context when inconsistencies are
+    found. Opt-in only: runs when verify=True or complexity >= 5.
 """
 
 from __future__ import annotations
@@ -28,11 +34,38 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from graph.store import GraphStore
     from models.router import ModelRouter
 
 from core_gb.types import CompletionResult, ExecutionResult, TaskNode
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class VerificationConfig:
+    """Configuration for the multi-layer verification pipeline.
+
+    Controls which verification layers are applied to DAG node outputs,
+    and at what complexity thresholds each layer activates.
+
+    Attributes:
+        layer1_enabled: Whether Layer 1 (rule-based format/type checks)
+            runs on every node. Default True.
+        layer2_threshold: Minimum node complexity for Layer 2
+            (self-consistency 3-way sampling) to activate. Default 3.
+        layer3_threshold: Minimum node complexity for Layer 3
+            (CRITIC-style knowledge graph verification). Default 5.
+        layer3_opt_in: Whether Layer 3 is enabled at all. Even when
+            complexity >= layer3_threshold, Layer 3 only runs if this
+            is True. Default False.
+    """
+
+    layer1_enabled: bool = True
+    layer2_threshold: int = 3
+    layer3_threshold: int = 5
+    layer3_opt_in: bool = False
+
 
 # Refusal phrases that indicate the LLM declined to answer.
 # Each pattern is compiled case-insensitive. We match against the start
@@ -422,3 +455,427 @@ class VerificationLayer2:
             Similarity ratio in [0.0, 1.0].
         """
         return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+# ---------------------------------------------------------------------------
+# Layer 3: CRITIC-style knowledge graph verification
+# ---------------------------------------------------------------------------
+
+# Minimum confidence score from EntityResolver to consider a mention as
+# a genuine entity reference in the output text.
+_ENTITY_CONFIDENCE_THRESHOLD: float = 0.7
+
+# Property keys on graph nodes that contain verifiable factual claims.
+# When two entities appear in the same output and both exist in the graph,
+# we compare these property values against what the output states.
+_VERIFIABLE_PROPERTIES: tuple[str, ...] = (
+    "language",
+    "framework",
+    "status",
+    "role",
+    "institution",
+    "type",
+    "relationship",
+    "platform",
+    "path",
+)
+
+
+@dataclass
+class Layer3Result:
+    """Result of a Layer 3 knowledge graph verification check.
+
+    Attributes:
+        passed: Whether all claims in the output are consistent with the graph.
+        issues: List of human-readable inconsistency descriptions.
+        entities_checked: Number of entities that were verified against the graph.
+        revised: Whether the output was revised via re-prompt.
+        layer: Verification layer number (always 3).
+    """
+
+    passed: bool
+    issues: list[str]
+    entities_checked: int
+    revised: bool
+    layer: int = 3
+
+
+class VerificationLayer3:
+    """Layer 3 CRITIC-style knowledge graph verification.
+
+    Extracts entities mentioned in LLM output using EntityResolver, checks
+    claimed relationships and properties against the knowledge graph, and
+    optionally revises the output via re-prompt with graph context when
+    inconsistencies are found.
+
+    Design constraints:
+    - Opt-in only: runs when verify=True or complexity >= complexity_threshold
+      (default 5).
+    - Requires access to GraphStore (for graph queries) and ModelRouter (for
+      re-prompt on inconsistency).
+    - Entity extraction uses EntityResolver (no LLM calls for extraction).
+    - Revision uses a single model call with graph context injected.
+    """
+
+    def __init__(
+        self,
+        store: GraphStore,
+        router: ModelRouter,
+        complexity_threshold: int = 5,
+    ) -> None:
+        self._store = store
+        self._router = router
+        self._complexity_threshold = complexity_threshold
+
+    @property
+    def complexity_threshold(self) -> int:
+        """Return the complexity threshold for auto-activation."""
+        return self._complexity_threshold
+
+    def _should_run(self, task: TaskNode, verify: bool) -> bool:
+        """Determine whether Layer 3 should run for this task.
+
+        Returns True when verify=True or task complexity >= threshold.
+        """
+        if verify:
+            return True
+        return task.complexity >= self._complexity_threshold
+
+    async def verify(
+        self,
+        output: str,
+        task: TaskNode,
+        verify: bool = False,
+    ) -> Layer3Result:
+        """Verify LLM output against the knowledge graph.
+
+        If gating conditions are not met (verify=False and complexity below
+        threshold), returns a passing result without checking.
+
+        Args:
+            output: The raw text output from the LLM.
+            task: The TaskNode being verified.
+            verify: Explicit opt-in flag for Layer 3.
+
+        Returns:
+            Layer3Result with pass/fail status, issues, and entity count.
+        """
+        if not self._should_run(task, verify):
+            return Layer3Result(
+                passed=True, issues=[], entities_checked=0, revised=False,
+            )
+
+        if not output or not output.strip():
+            return Layer3Result(
+                passed=True, issues=[], entities_checked=0, revised=False,
+            )
+
+        # Step 1: Extract entities from output text
+        entities = self._extract_entities(output)
+        if not entities:
+            return Layer3Result(
+                passed=True, issues=[], entities_checked=0, revised=False,
+            )
+
+        # Step 2: Verify claims against the graph
+        issues = self._check_claims(output, entities)
+
+        passed = len(issues) == 0
+        return Layer3Result(
+            passed=passed,
+            issues=issues,
+            entities_checked=len(entities),
+            revised=False,
+        )
+
+    async def verify_and_revise(
+        self,
+        output: str,
+        task: TaskNode,
+        verify: bool = False,
+    ) -> tuple[str, Layer3Result]:
+        """Verify output and revise via re-prompt on inconsistency.
+
+        If the output is consistent with the graph (or gating conditions are
+        not met), returns the original output unchanged.
+
+        If inconsistencies are found, builds a re-prompt with the original
+        task description, the issues found, and graph context, then calls
+        the model to produce a revised output.
+
+        Args:
+            output: The raw text output from the LLM.
+            task: The TaskNode being verified.
+            verify: Explicit opt-in flag for Layer 3.
+
+        Returns:
+            Tuple of (final_output, Layer3Result).
+        """
+        result = await self.verify(output, task, verify=verify)
+
+        if result.passed or result.entities_checked == 0:
+            return output, result
+
+        # Build graph context for revision
+        entity_ids = [eid for eid, _conf in self._extract_entities(output)]
+        graph_context = self._store.get_context(entity_ids)
+        context_text = graph_context.format()
+
+        # Build revision prompt with issues and graph context
+        issues_text = "\n".join(f"- {issue}" for issue in result.issues)
+        revision_prompt = (
+            f"{task.description}\n\n"
+            f"[KNOWLEDGE GRAPH VERIFICATION: The previous response contained "
+            f"factual inconsistencies with the known knowledge graph. "
+            f"Please revise the response to be consistent with the following "
+            f"verified facts.]\n\n"
+            f"Issues found:\n{issues_text}\n\n"
+            f"Verified graph context:\n{context_text}\n\n"
+            f"Original response to revise:\n{output}"
+        )
+
+        messages = [{"role": "user", "content": revision_prompt}]
+
+        logger.info(
+            "Layer 3 verification found %d inconsistencies for node %s, "
+            "triggering revision",
+            len(result.issues),
+            task.id,
+        )
+
+        try:
+            completion = await self._router.route(task, messages)
+            revised_output = completion.content
+            result.revised = True
+            return revised_output, result
+        except Exception as exc:
+            logger.warning(
+                "Layer 3 revision failed for node %s: %s, returning original",
+                task.id,
+                exc,
+            )
+            return output, result
+
+    def _extract_entities(
+        self, text: str,
+    ) -> list[tuple[str, float]]:
+        """Extract entity mentions from text using EntityResolver.
+
+        Splits the text into candidate phrases (n-grams of 1-3 words from
+        each sentence) and resolves each against the graph. Returns
+        deduplicated entity matches above the confidence threshold.
+
+        Args:
+            text: The output text to extract entities from.
+
+        Returns:
+            List of (entity_id, confidence) tuples, deduplicated by entity_id.
+        """
+        from graph.resolver import EntityResolver
+
+        resolver = EntityResolver(self._store)
+
+        # Extract candidate phrases: split into sentences, then n-grams
+        sentences = re.split(r'[.!?;]\s+', text.strip())
+        candidates: list[str] = []
+        for sentence in sentences:
+            words = sentence.split()
+            # Generate 1-gram, 2-gram, and 3-gram candidates
+            for n in range(1, min(4, len(words) + 1)):
+                for i in range(len(words) - n + 1):
+                    phrase = " ".join(words[i:i + n])
+                    # Skip very short or common words as single-word candidates
+                    if n == 1 and len(phrase) <= 2:
+                        continue
+                    candidates.append(phrase)
+
+        # Resolve each candidate and collect best matches
+        seen: dict[str, float] = {}
+        for candidate in candidates:
+            matches = resolver.resolve(candidate, top_k=1)
+            for eid, confidence in matches:
+                if confidence >= _ENTITY_CONFIDENCE_THRESHOLD:
+                    if confidence > seen.get(eid, 0.0):
+                        seen[eid] = confidence
+
+        return sorted(seen.items(), key=lambda x: x[1], reverse=True)
+
+    def _check_claims(
+        self,
+        output: str,
+        entities: list[tuple[str, float]],
+    ) -> list[str]:
+        """Check claims in the output against known graph properties.
+
+        For each extracted entity, loads its properties from the graph and
+        checks whether the output text contradicts any verifiable property
+        values. Uses a two-pass approach:
+
+        1. For each entity, collect its verifiable graph properties.
+        2. For each property, use targeted regex patterns to extract the
+           claimed value from sentences mentioning the entity.
+        3. Flag only when the output explicitly states a different value
+           for a property that the graph defines.
+
+        Args:
+            output: The LLM output text.
+            entities: List of (entity_id, confidence) from entity extraction.
+
+        Returns:
+            List of human-readable inconsistency descriptions.
+        """
+        issues: list[str] = []
+        output_lower = output.lower()
+
+        for entity_id, _confidence in entities:
+            node_info = self._store._find_node_table(entity_id)
+            if node_info is None:
+                continue
+
+            table_name, props = node_info
+            entity_name = str(
+                props.get("name", props.get("path", entity_id))
+            )
+            entity_lower = entity_name.lower()
+
+            # Skip entity if not mentioned in the output
+            if entity_lower not in output_lower:
+                continue
+
+            # Extract sentences mentioning this entity
+            entity_sentences = self._find_entity_sentences(
+                output_lower, entity_lower,
+            )
+            if not entity_sentences:
+                continue
+
+            # Check each verifiable property
+            for prop_key in _VERIFIABLE_PROPERTIES:
+                graph_value = props.get(prop_key)
+                if not graph_value or not str(graph_value).strip():
+                    continue
+
+                graph_value_str = str(graph_value).strip()
+                graph_value_lower = graph_value_str.lower()
+
+                contradiction = self._detect_property_contradiction(
+                    entity_sentences,
+                    entity_lower,
+                    prop_key,
+                    graph_value_lower,
+                )
+                if contradiction:
+                    issues.append(
+                        f"Claimed {prop_key} for {entity_name} contradicts "
+                        f"knowledge graph: graph says "
+                        f"{prop_key}='{graph_value_str}', but output states: "
+                        f"{contradiction}"
+                    )
+
+        return issues
+
+    @staticmethod
+    def _find_entity_sentences(
+        output_lower: str,
+        entity_lower: str,
+    ) -> list[str]:
+        """Find sentences in the output that mention a specific entity.
+
+        Args:
+            output_lower: Lowercased full output text.
+            entity_lower: Lowercased entity name to search for.
+
+        Returns:
+            List of lowercased sentences containing the entity name.
+        """
+        sentences = re.split(r'[.!?;]\s+', output_lower)
+        return [s for s in sentences if entity_lower in s]
+
+    @staticmethod
+    def _detect_property_contradiction(
+        entity_sentences: list[str],
+        entity_lower: str,
+        prop_key: str,
+        graph_value_lower: str,
+    ) -> str | None:
+        """Detect if entity sentences contradict a known property value.
+
+        Uses targeted regex patterns per property type to extract claimed
+        values from sentences. Only flags a contradiction when the output
+        explicitly states a different concrete value for the property.
+
+        The patterns are intentionally narrow to minimize false positives.
+        Each pattern captures the claimed value in group 1. The captured
+        value is compared against the graph value; if they differ (and the
+        captured value is not a filler/stop word), a contradiction is
+        reported.
+
+        Args:
+            entity_sentences: Lowercased sentences mentioning the entity.
+            entity_lower: Lowercased entity name.
+            prop_key: Property key (e.g., "language", "role").
+            graph_value_lower: Known correct value from the graph (lowercased).
+
+        Returns:
+            The contradicting claim text if found, None otherwise.
+        """
+        # Patterns per property type. Each pattern must capture the claimed
+        # value as group 1. Patterns are narrow by design: they only match
+        # explicit property assertions, not incidental word usage.
+        claim_patterns: dict[str, list[str]] = {
+            "language": [
+                r"(?:written|coded|programmed|developed|built)\s+in\s+(\w+)",
+                r"(?:uses?|using)\s+(\w+)\s+(?:as\s+(?:its?\s+)?)?(?:language|programming)",
+            ],
+            "framework": [
+                r"(?:built|developed|made)\s+(?:with|on|using)\s+(?:the\s+)?(\w+)\s+framework",
+                r"(?:uses?|using)\s+(?:the\s+)?(\w+)\s+framework",
+            ],
+            "role": [
+                r"(?:" + re.escape(entity_lower) + r")\s+(?:is|works\s+as)\s+(?:a\s+)?(\w+(?:\s+\w+)?)",
+            ],
+            "institution": [
+                r"(?:" + re.escape(entity_lower) + r")\s+(?:studies|studied|attends?|enrolled)\s+at\s+(\S+)",
+                r"(?:" + re.escape(entity_lower) + r")\s+(?:is\s+)?(?:from|at)\s+(\S+)",
+            ],
+            "status": [
+                r"(?:" + re.escape(entity_lower) + r")\s+(?:is\s+)?(?:currently\s+)?(\w+)\s+(?:project|status)",
+                r"status\s+(?:is\s+|of\s+\S+\s+is\s+)?(\w+)",
+            ],
+        }
+
+        patterns = claim_patterns.get(prop_key, [])
+        if not patterns:
+            return None
+
+        # Stop words: values that are never real property values
+        stop_words = frozenset({
+            "a", "an", "the", "is", "are", "was", "were", "has", "have",
+            "had", "and", "or", "but", "its", "their", "his", "her", "it",
+            "this", "that", "not", "also", "which", "who", "whom", "with",
+            "from", "for", "by", "to", "in", "on", "at", "of", "be",
+            "been", "being", "do", "does", "did", "will", "would", "could",
+            "should", "may", "might", "can", "shall",
+        })
+
+        for sentence in entity_sentences:
+            for pattern in patterns:
+                for match in re.finditer(pattern, sentence):
+                    claimed_value = match.group(1).strip().lower()
+
+                    # Skip stop words
+                    if claimed_value in stop_words:
+                        continue
+
+                    # Skip if the claimed value matches the graph value
+                    if (
+                        claimed_value == graph_value_lower
+                        or claimed_value in graph_value_lower
+                        or graph_value_lower in claimed_value
+                    ):
+                        continue
+
+                    # Found a genuine contradiction
+                    return match.group(0)
+
+        return None
