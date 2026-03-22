@@ -2,7 +2,7 @@
 
 Node types: User, Project, File, Service, Contact, Pattern, Memory, Task, Skill, ExecutionTree
 Edge types: OWNS, USES, STUDIES_AT, ABOUT, PRODUCED, CREATED_PATTERN, DEPENDS_ON, CONTEXT_FROM,
-            INVOLVES, DERIVED_FROM, REFLECTION_OF
+            INVOLVES, DERIVED_FROM, REFLECTION_OF, USED_SKILL
 """
 
 from __future__ import annotations
@@ -71,6 +71,8 @@ NODE_TYPES: list[NodeType] = [
     NodeType("Skill", {
         "id": "STRING", "name": "STRING", "description": "STRING",
         "path": "STRING",
+        "url": "STRING", "action_sequence": "STRING",
+        "extracted_data_template": "STRING", "domain": "STRING",
     }),
     NodeType("ExecutionTree", {
         "id": "STRING", "root_task_id": "STRING",
@@ -94,6 +96,7 @@ EDGE_TYPES: list[EdgeType] = [
     EdgeType("DERIVED_FROM", "ExecutionTree", "Task", {}),
     EdgeType("HAS_SKILL", "User", "Skill", {}),
     EdgeType("REFLECTION_OF", "Memory", "Task", {}),
+    EdgeType("USED_SKILL", "Task", "Skill", {}),
 ]
 
 
