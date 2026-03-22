@@ -2,7 +2,7 @@
 
 Node types: User, Project, File, Service, Contact, Pattern, Memory, Task, Skill, ExecutionTree
 Edge types: OWNS, USES, STUDIES_AT, ABOUT, PRODUCED, CREATED_PATTERN, DEPENDS_ON, CONTEXT_FROM,
-            INVOLVES, DERIVED_FROM
+            INVOLVES, DERIVED_FROM, REFLECTION_OF
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ NODE_TYPES: list[NodeType] = [
     NodeType("PatternNode", {
         "id": "STRING", "trigger_template": "STRING", "description": "STRING",
         "variable_slots": "STRING", "tree_template": "STRING", "success_count": "INT64",
+        "failure_count": "INT64",
         "avg_tokens": "DOUBLE", "avg_latency_ms": "DOUBLE",
         "created_at": "TIMESTAMP", "last_used": "TIMESTAMP",
     }),
@@ -92,6 +93,7 @@ EDGE_TYPES: list[EdgeType] = [
     EdgeType("INVOLVES", "Task", "Service", {}),
     EdgeType("DERIVED_FROM", "ExecutionTree", "Task", {}),
     EdgeType("HAS_SKILL", "User", "Skill", {}),
+    EdgeType("REFLECTION_OF", "Memory", "Task", {}),
 ]
 
 
