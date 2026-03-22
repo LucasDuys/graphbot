@@ -1,8 +1,8 @@
 # GraphBot Progress
 
 ## Current Phase
-**Phase 14: Validation, Daily Use, and Exhaustive Agent Research -- COMPLETE**
-All phases through 14 complete. 190+ papers researched, architecture validated, WhatsApp + benchmarks ready for daily use.
+**Phase 15: Foundation for Autonomy -- COMPLETE**
+All phases through 15 complete. System now learns from failures, has safety guards, model cascade, and semantic caching.
 
 ## Completed
 - [x] Full architecture design (2026-03-20)
@@ -126,6 +126,20 @@ All phases through 14 complete. 190+ papers researched, architecture validated, 
 - [x] T126: Architecture gap analysis -- 10 gaps, Phase 15+ roadmap (committed 1502d0d)
 - **Key finding: Current DAG + graph architecture CAN support full autonomy (4 arch changes + 6 new features needed)**
 - **Total: 630+ GraphBot tests, all passing**
+
+## Phase 15 Completed (2026-03-22)
+- [x] T127: Failure reflection engine -- post-execution LLM reflection stored in graph (committed 95db339)
+- [x] T128: Pattern success/failure counters + weighted matching (11 tests, committed 6830ef3)
+- [x] T129: DAG intent classifier + dangerous command blocking (committed 5b525e3)
+- [x] T130: Model cascade mode -- try cheap first, escalate on low confidence (18 tests, committed 03464ad)
+- [x] T131: Reflection retrieval in context assembly + decomposer injection (16 tests, committed 2f1145a)
+- [x] T132: Failure deprioritization -- skip <20% success rate patterns (committed aece5ac)
+- [x] T133: Composition attack detection + shell sandbox allowlist/blocklist (25 tests, committed 9bf14ed)
+- [x] T134: Cascade confidence estimation + token budget directives (30 tests, committed 7863ad9)
+- [x] T135: Semantic embedding layer for pattern matching -- sentence-transformers (15 tests, committed 92c8cd9)
+- [x] T136: Output sanitization + recursion limits + safety integration tests (42 tests, committed 3e26d87)
+- **Key capabilities: learns from failures, safety guards, model cascade, semantic caching**
+- **Total: 792 tests, all passing**
 
 ## In Progress
 _Nothing._
