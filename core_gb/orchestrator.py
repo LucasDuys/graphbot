@@ -12,6 +12,7 @@ from core_gb.decomposer import Decomposer
 from core_gb.executor import SimpleExecutor
 from core_gb.intake import IntakeParser, TaskType
 from core_gb.patterns import PatternMatcher, PatternStore
+from core_gb.constitution import ConstitutionalChecker
 from core_gb.safety import IntentClassifier
 from core_gb.tool_factory import ToolFactory
 from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode, TaskStatus
@@ -68,6 +69,7 @@ class Orchestrator:
         self._pattern_matcher = PatternMatcher()
         self._graph_updater = GraphUpdater(store)
         self._intent_classifier = IntentClassifier()
+        self._constitutional_checker = ConstitutionalChecker()
 
         if self._enable_replan:
             self._dag_executor.set_replan_callback(self._replan_callback)
@@ -100,6 +102,15 @@ class Orchestrator:
                     verdict = self._intent_classifier.classify_dag(nodes)
                     if verdict.blocked:
                         return self._blocked_result(message, verdict.reason)
+
+                    # Constitutional check on pattern-instantiated DAG
+                    const_verdict = self._constitutional_checker.check_plan(nodes)
+                    if not const_verdict.passed:
+                        reasons = "; ".join(
+                            f"{name}: {reason}"
+                            for name, reason in const_verdict.violations
+                        )
+                        return self._blocked_result(message, reasons)
 
                     self._pattern_store.increment_usage(pattern.id)
                     logger.info("Pattern cache hit: %s", pattern.trigger[:60])
@@ -159,6 +170,15 @@ class Orchestrator:
         verdict = self._intent_classifier.classify_dag(nodes)
         if verdict.blocked:
             return self._blocked_result(message, verdict.reason)
+
+        # Constitutional check on decomposed DAG before execution
+        const_verdict = self._constitutional_checker.check_plan(nodes)
+        if not const_verdict.passed:
+            reasons = "; ".join(
+                f"{name}: {reason}"
+                for name, reason in const_verdict.violations
+            )
+            return self._blocked_result(message, reasons)
 
         # Filter to atomic (leaf) nodes only
         leaves = [n for n in nodes if n.is_atomic]
