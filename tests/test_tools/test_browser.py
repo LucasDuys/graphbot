@@ -282,13 +282,20 @@ class TestFill:
     async def test_fill_success(
         self, tool: BrowserTool, mocks: dict[str, AsyncMock]
     ) -> None:
-        """Fill a form field with a value."""
+        """Fill a form field with a value (forms opted-in via env)."""
         tool._playwright = mocks["playwright"]
         tool._browser = mocks["browser"]
         tool._context = mocks["context"]
         tool._page = mocks["page"]
 
-        result = await tool.fill("input#email", "user@example.com")
+        with patch.dict("os.environ", {"BROWSER_ALLOW_FORMS": "true"}):
+            tool_with_forms = BrowserTool()
+        tool_with_forms._playwright = mocks["playwright"]
+        tool_with_forms._browser = mocks["browser"]
+        tool_with_forms._context = mocks["context"]
+        tool_with_forms._page = mocks["page"]
+
+        result = await tool_with_forms.fill("input#email", "user@example.com")
 
         assert result["success"] is True
         mocks["page"].fill.assert_awaited_once_with("input#email", "user@example.com")
@@ -303,16 +310,19 @@ class TestFill:
     async def test_fill_selector_not_found(
         self, tool: BrowserTool, mocks: dict[str, AsyncMock]
     ) -> None:
-        """Fill on non-existent selector returns error."""
+        """Fill on non-existent selector returns error (forms opted-in via env)."""
         mocks["page"].fill.side_effect = Exception(
             "Timeout waiting for selector 'input#missing'"
         )
-        tool._playwright = mocks["playwright"]
-        tool._browser = mocks["browser"]
-        tool._context = mocks["context"]
-        tool._page = mocks["page"]
 
-        result = await tool.fill("input#missing", "value")
+        with patch.dict("os.environ", {"BROWSER_ALLOW_FORMS": "true"}):
+            tool_with_forms = BrowserTool()
+        tool_with_forms._playwright = mocks["playwright"]
+        tool_with_forms._browser = mocks["browser"]
+        tool_with_forms._context = mocks["context"]
+        tool_with_forms._page = mocks["page"]
+
+        result = await tool_with_forms.fill("input#missing", "value")
 
         assert result["success"] is False
         assert "input#missing" in result["error"]
