@@ -1,8 +1,8 @@
 # GraphBot Progress
 
 ## Current Phase
-**Phase 5: Integration + Quality -- COMPLETE**
-All 5 phases of the core engine are done. Next: optimization, real-world usage, UI.
+**Phase 12: SSE Observability + Docs -- COMPLETE**
+All core phases plus tool system, UI, and observability done.
 
 ## Completed
 - [x] Full architecture design (2026-03-20)
@@ -82,6 +82,20 @@ All 5 phases of the core engine are done. Next: optimization, real-world usage, 
   - test_pattern_cache_skips_decomposition: pre-seeded PatternNode = 0 decompose + 3 leaves = 3 LLM calls
 - **Total: 868 tests (864 pre-existing + 4 new), all passing**
 
+## Phase 11 Completed (2026-03-22)
+- [x] T088/T089: Structured tool params + smart decomposition
+- [x] T090/T091: Tool failure retry + CodeEditAgent
+- [x] T097: Shell command extraction fix
+- [x] T098: Track tool vs LLM usage in ExecutionResult
+- [x] Benchmark: 8/10 real tasks, $0.0005 cost, file 5/5, web 3/3
+- **Total: 978 tests, all passing**
+
+## Phase 12 Completed (2026-03-22)
+- [x] T099: SSE tool.invoke + tool.result observability events in _process_task
+- [x] T100: Updated PROGRESS.md + README.md with latest benchmarks
+- [x] T101: Test coverage for tool observability events
+- **Total: 979 tests, all passing**
+
 ## In Progress
 _Nothing._
 
@@ -109,7 +123,7 @@ _Nothing blocked._
 | Metric | Target | Current | Notes |
 |--------|--------|---------|-------|
 | Lines of code (new) | <8,000 | ~3,500 | core_gb + graph + models + scripts + tests |
-| Test count | -- | 868 | All passing (Phase 7 complete) |
+| Test count | -- | 979 | All passing (Phase 12 complete) |
 | 2-hop query (100 nodes) | <1ms | ~13ms | Needs optimization (full table scan approach) |
 | Context assembly (100 nodes) | <10ms | ~23ms | Needs indexed queries |
 | Entity resolution (100 nodes) | <10ms | ~3ms | Meets target |
@@ -159,3 +173,16 @@ _Nothing blocked._
   - Removed ~160 lines of sequential execution code from Orchestrator
 - 757 tests passing, 0 failures
 - Next session: Phase 4 -- pattern learning and caching
+
+### 2026-03-22 -- Session 5: Phase 11 + Phase 12 (complete)
+- Phase 11: Tool system refinements (T088-T098)
+  - Structured tool params in TaskNode for domain-specific routing
+  - Smart decomposition with INTEGRATED classification
+  - Tool failure retry with LLM fallback
+  - Shell command extraction fix
+  - Tool vs LLM usage tracking in ExecutionResult
+  - Benchmark: 8/10 real tasks, $0.0005 cost, tokens halved vs Phase 9
+- Phase 12: SSE observability + documentation (T099-T101)
+  - tool.invoke and tool.result SSE events for per-node visibility
+  - Updated PROGRESS.md and README.md with latest benchmarks
+  - 979 tests passing, 0 failures

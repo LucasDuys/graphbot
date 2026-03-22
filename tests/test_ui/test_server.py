@@ -62,3 +62,16 @@ def test_server_has_process_task():
     assert "intake.complete" in source
     assert "task.complete" in source
     assert "task.error" in source
+
+
+def test_server_has_tool_observability_events():
+    """Verify SSE emits tool.invoke and tool.result events for leaf nodes."""
+    server_path = Path(__file__).parent.parent.parent / "ui" / "server.py"
+    source = server_path.read_text()
+    assert "tool.invoke" in source
+    assert "tool.result" in source
+    assert "tool_method" in source
+    assert "tool_params" in source
+    assert "output_preview" in source
+    assert "used_tool" in source
+    assert "latency_ms" in source

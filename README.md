@@ -63,10 +63,12 @@ Run:
 python scripts/seed_graph.py          # Seed knowledge graph
 python scripts/test_live.py           # Live integration test
 python scripts/compare.py "your task" # A/B comparison
-python -m pytest tests/ -v            # Run test suite (287 tests)
+python -m pytest tests/ -v            # Run test suite (979 tests)
 ```
 
-## Benchmark Results (15 tasks, 2026-03-21)
+## Benchmark Results
+
+### Knowledge Tasks (15 tasks, 2026-03-21)
 
 | Category | Tasks | Success | Avg Tokens | Avg Cost | Avg Latency |
 |----------|-------|---------|-----------|----------|-------------|
@@ -75,17 +77,28 @@ python -m pytest tests/ -v            # Run test suite (287 tests)
 | Sequential (ordered chain) | 5 | 5/5 | 3,044 | $0.000227 | 33.1s |
 | **Total** | **15** | **15/15** | **2,324** | **$0.000197** | **25.6s** |
 
-**Total cost for all 15 tasks: $0.003** -- effectively free.
+### Real-World Tool Tasks (10 tasks, 2026-03-22)
 
-100% decomposition success rate on decomposable tasks. See [benchmarks/RESULTS.md](benchmarks/RESULTS.md) for full breakdown.
+| Category | Tasks | Success | Notes |
+|----------|-------|---------|-------|
+| File (list, read, search) | 5 | 5/5 | All tool-routed |
+| Web (search, summarize) | 3 | 3/3 | All tool-routed |
+| Shell (command execution) | 2 | 0/2 | Command extraction gap |
+| **Total** | **10** | **8/10** | **$0.0005 total cost** |
+
+**Tokens halved vs Phase 9** (15,935 down from 29,997). Total cost for all 25 tasks: $0.0035.
+
+See [benchmarks/RESULTS.md](benchmarks/RESULTS.md) and [benchmarks/REAL_TASKS_RESULTS.md](benchmarks/REAL_TASKS_RESULTS.md) for full breakdown.
 
 ## Performance
 
-- **309 tests**, all passing
+- **979 tests**, all passing
 - **Entity resolution**: ~3ms (meets <10ms target)
 - **Pattern matching**: <5ms
 - **Decomposition success**: 100% on 70B models with JSON mode
+- **Real-world tasks**: 8/10 success (file 5/5, web 3/3, shell 0/2)
 - **Cost**: $0.0002 average per task on free models
+- **SSE observability**: tool.invoke / tool.result events per leaf node
 
 ## Tech Stack
 

@@ -207,19 +207,43 @@ async def _process_task(task_id: str, message: str, queue: asyncio.Queue) -> Non
             template = orchestrator._decomposer.last_template
             orchestrator._dag_executor.aggregation_template = template
 
-            # Mark leaves as running
+            # Emit tool.invoke for each leaf before execution starts
             leaves = [n for n in nodes if n.is_atomic]
             for leaf in leaves:
+                await queue.put({
+                    "type": "tool.invoke",
+                    "payload": {
+                        "node_id": leaf.id,
+                        "tool_method": leaf.tool_method or "llm",
+                        "tool_params": dict(leaf.tool_params) if leaf.tool_params else {},
+                        "domain": leaf.domain.value,
+                    },
+                })
                 await queue.put({"type": "node.status", "payload": {"node_id": leaf.id, "status": "running"}})
 
+            exec_start = time.time()
             result = await orchestrator._dag_executor.execute(nodes)
+            exec_elapsed_ms = (time.time() - exec_start) * 1000
 
-            # Mark leaves as completed
+            # Emit tool.result + node status for each leaf after execution
+            per_leaf_tokens = result.total_tokens // max(len(leaves), 1)
+            per_leaf_latency = exec_elapsed_ms / max(len(leaves), 1)
             for leaf in leaves:
+                await queue.put({
+                    "type": "tool.result",
+                    "payload": {
+                        "node_id": leaf.id,
+                        "success": result.success,
+                        "output_preview": result.output[:200],
+                        "tokens": per_leaf_tokens,
+                        "latency_ms": per_leaf_latency,
+                        "used_tool": result.tools_used > 0,
+                    },
+                })
                 await queue.put({"type": "node.status", "payload": {
                     "node_id": leaf.id,
                     "status": "completed" if result.success else "failed",
-                    "tokens": result.total_tokens // max(len(leaves), 1),
+                    "tokens": per_leaf_tokens,
                 }})
 
             # Graph update
