@@ -37,6 +37,7 @@ class GraphStore:
         """Create all node and edge tables defined in the schema.
 
         Uses IF NOT EXISTS so this method is idempotent -- safe to call multiple times.
+        After creating tables, migrates any missing columns (for upgrades).
         """
         conn = self._get_conn()
 
@@ -50,11 +51,28 @@ class GraphStore:
             logger.debug("Creating edge table: %s", edge_type.name)
             conn.execute(cypher)
 
+        # Migrate missing columns on existing tables.
+        self._migrate_columns(conn)
+
         logger.info(
             "Schema initialized: %d node tables, %d edge tables",
             len(NODE_TYPES),
             len(EDGE_TYPES),
         )
+
+    def _migrate_columns(self, conn: Any) -> None:
+        """Add any columns defined in the schema but missing from existing tables."""
+        for node_type in NODE_TYPES:
+            for col_name, col_type in node_type.properties.items():
+                if col_name == "id":
+                    continue
+                try:
+                    conn.execute(
+                        f"ALTER TABLE {node_type.name} ADD {col_name} {col_type} DEFAULT NULL"
+                    )
+                    logger.info("Migrated: added %s.%s (%s)", node_type.name, col_name, col_type)
+                except RuntimeError:
+                    pass  # Column already exists
 
     def close(self) -> None:
         """Release the Kuzu connection. Safe to call multiple times."""
