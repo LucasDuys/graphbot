@@ -60,3 +60,31 @@ export async function getGraphStats(): Promise<Record<string, number>> {
   }
   return res.json();
 }
+
+export type KGNode = {
+  _type: string;
+  id: string;
+  name?: string;
+  [key: string]: unknown;
+};
+
+export type KGEdge = {
+  source: string;
+  target: string;
+  type: string;
+  from_type: string;
+  to_type: string;
+};
+
+export type KGData = {
+  nodes: KGNode[];
+  edges: KGEdge[];
+};
+
+export async function getGraphEntities(): Promise<KGData> {
+  const res = await fetch(`${API_BASE}/api/graph/entities`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch graph entities: ${res.status}`);
+  }
+  return res.json();
+}

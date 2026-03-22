@@ -125,6 +125,54 @@ async def graph_stats() -> dict:
     return stats
 
 
+@app.get("/api/graph/entities")
+async def graph_entities() -> dict:
+    """Return all knowledge graph nodes and edges for visualization."""
+    orchestrator = get_orchestrator()
+    store = orchestrator._store
+
+    from graph.schema import NODE_TYPES, EDGE_TYPES
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+    # Collect all nodes from each table
+    for node_type in NODE_TYPES:
+        table = node_type.name
+        try:
+            props_select = ", ".join(f"n.{k} AS {k}" for k in node_type.properties)
+            rows = store.query(f"MATCH (n:{table}) RETURN {props_select}")
+            for row in rows:
+                node_data: dict[str, object] = {"_type": table}
+                for k, v in row.items():
+                    if v is not None:
+                        node_data[k] = v
+                nodes.append(node_data)
+        except Exception:
+            pass
+
+    # Collect all edges
+    for edge_type in EDGE_TYPES:
+        try:
+            cypher = (
+                f"MATCH (a:{edge_type.from_type})-[r:{edge_type.name}]->(b:{edge_type.to_type}) "
+                f"RETURN a.id AS source, b.id AS target"
+            )
+            rows = store.query(cypher)
+            for row in rows:
+                edges.append({
+                    "source": row["source"],
+                    "target": row["target"],
+                    "type": edge_type.name,
+                    "from_type": edge_type.from_type,
+                    "to_type": edge_type.to_type,
+                })
+        except Exception:
+            pass
+
+    return {"nodes": nodes, "edges": edges}
+
+
 async def _process_task(task_id: str, message: str, queue: asyncio.Queue) -> None:
     """Process a task and emit granular events to the SSE queue."""
     orchestrator = get_orchestrator()

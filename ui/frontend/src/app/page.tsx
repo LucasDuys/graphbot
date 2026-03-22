@@ -5,6 +5,9 @@ import { TaskInput } from "@/components/TaskInput";
 import { StatusStepper } from "@/components/StatusStepper";
 import { NodeDetail } from "@/components/NodeDetail";
 import { ResultPanel } from "@/components/ResultPanel";
+import { KnowledgeGraphPanel } from "@/components/KnowledgeGraphPanel";
+import { KnowledgeGraphToggle } from "@/components/KnowledgeGraphToggle";
+import { DarkModeToggle } from "@/components/DarkModeToggle";
 
 export default function Home() {
   return (
@@ -29,7 +32,11 @@ export default function Home() {
           <span style={{ fontSize: "var(--text-lg)", fontWeight: 600 }}>GraphBot</span>
           <span style={{ fontSize: "var(--text-xs)", color: "var(--gray-8)", fontFamily: "var(--font-mono)" }}>v0.1.0</span>
         </div>
-        <StatusStepper />
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+          <StatusStepper />
+          <KnowledgeGraphToggle />
+          <DarkModeToggle />
+        </div>
       </header>
 
       {/* Task input */}
@@ -63,6 +70,9 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Knowledge Graph Panel -- bottom-right overlay */}
+      <KnowledgeGraphPanel />
     </div>
   );
 }

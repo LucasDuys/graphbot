@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import type { KGNode, KGEdge } from "@/lib/api";
 
 export type NodeStatus = "pending" | "running" | "completed" | "failed";
 
@@ -37,8 +38,15 @@ export type TaskState = {
   error: string | null;
 };
 
+export type DagEdgeData = {
+  source: string;
+  target: string;
+  label?: string;
+  flowing?: boolean;
+};
+
 export const dagNodesAtom = atom<DagNodeData[]>([]);
-export const dagEdgesAtom = atom<{ source: string; target: string; label?: string }[]>([]);
+export const dagEdgesAtom = atom<DagEdgeData[]>([]);
 export const taskStateAtom = atom<TaskState>({
   task_id: null,
   message: "",
@@ -47,3 +55,10 @@ export const taskStateAtom = atom<TaskState>({
   result: null,
   error: null,
 });
+export const selectedNodeIdAtom = atom<string | null>(null);
+export const executionStartAtom = atom<number | null>(null);
+
+// Knowledge graph panel state
+export const kgNodesAtom = atom<KGNode[]>([]);
+export const kgEdgesAtom = atom<KGEdge[]>([]);
+export const kgPanelOpenAtom = atom<boolean>(false);
