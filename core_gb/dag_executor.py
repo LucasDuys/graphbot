@@ -22,6 +22,7 @@ import re
 from core_gb.aggregator import Aggregator
 from core_gb.autonomy import AutonomyLevel, RiskScorer
 from core_gb.sanitizer import OutputSanitizer
+from core_gb.transaction import Snapshot, SnapshotType, TransactionManager
 from core_gb.types import ConditionalNode, ExecutionResult, LoopNode, TaskNode, TaskStatus
 from core_gb.verification import (
     VerificationConfig,
@@ -84,6 +85,9 @@ class DAGExecutor:
         # and blocked if its risk exceeds the autonomy ceiling.
         self._risk_scorer: RiskScorer | None = risk_scorer
         self._autonomy_level: AutonomyLevel | None = autonomy_level
+        # Transactional execution: snapshot target state before file/shell
+        # operations and rollback on failure or safety violation.
+        self._transaction_manager: TransactionManager = TransactionManager()
 
     def set_replan_callback(
         self,
@@ -964,6 +968,60 @@ class DAGExecutor:
         )
         return sub_dag
 
+    def _snapshot_for_node(self, node: TaskNode) -> Snapshot | None:
+        """Capture a pre-execution snapshot for transactional rollback.
+
+        For file-write operations (tool_method contains 'file_write' or
+        'file_edit', or tool_params has a 'path'/'file_path' target in
+        a file-domain node), snapshots the target file state.
+
+        For shell operations (tool_method is 'shell_run' or domain is CODE
+        with a command param), snapshots the command for best-effort logging.
+
+        Returns None for operations that do not require transactional
+        protection (e.g., pure reads, LLM reasoning).
+
+        Args:
+            node: The TaskNode about to be executed.
+
+        Returns:
+            A Snapshot if transactional protection applies, None otherwise.
+        """
+        tool = node.tool_method or ""
+
+        # File write/edit operations: snapshot the target file
+        if tool in ("file_write", "file_edit", "file_create"):
+            target = (
+                node.tool_params.get("path")
+                or node.tool_params.get("file_path")
+                or node.tool_params.get("target")
+            )
+            if target:
+                return self._transaction_manager.snapshot_file(target)
+
+        # Shell operations: snapshot for best-effort rollback logging
+        if tool == "shell_run":
+            command = node.tool_params.get("command", node.description)
+            return self._transaction_manager.snapshot_shell(command)
+
+        # Domain-based heuristic: FILE domain nodes with write-like params
+        if node.domain.value == "file" and node.tool_params:
+            target = (
+                node.tool_params.get("path")
+                or node.tool_params.get("file_path")
+                or node.tool_params.get("target")
+            )
+            if target:
+                return self._transaction_manager.snapshot_file(target)
+
+        # Domain-based heuristic: CODE domain nodes with a command param
+        if node.domain.value == "code" and node.tool_params:
+            command = node.tool_params.get("command")
+            if command:
+                return self._transaction_manager.snapshot_shell(command)
+
+        return None
+
     async def _execute_node(
         self,
         node: TaskNode,
@@ -975,6 +1033,9 @@ class DAGExecutor:
         and AutonomyLevel are configured, the node's risk is scored and
         compared against the autonomy ceiling. Nodes exceeding the ceiling
         are blocked with a failed ExecutionResult.
+
+        Wraps file and shell operations in a transactional snapshot so that
+        failures trigger automatic rollback to the pre-execution state.
         """
         # Per-action autonomy enforcement: score risk and block if not allowed
         if self._risk_scorer is not None and self._autonomy_level is not None:
@@ -1000,6 +1061,9 @@ class DAGExecutor:
                         f"autonomy_level={self._autonomy_level.value}",
                     ),
                 )
+
+        # --- Transactional snapshot: capture target state before execution ---
+        snapshot = self._snapshot_for_node(node)
 
         async with self._semaphore:
             task_text = node.description
@@ -1048,6 +1112,16 @@ class DAGExecutor:
                     total_cost=0.0,
                     errors=(str(exc),),
                 )
+
+            # --- Transactional rollback on failure ---
+            if not result.success and snapshot is not None:
+                txn_result = self._transaction_manager.rollback(snapshot)
+                if txn_result.rolled_back:
+                    logger.info(
+                        "Transactional rollback for node '%s': success=%s",
+                        node.id,
+                        txn_result.rollback_success,
+                    )
 
             # --- Verification pipeline (config-driven) ---
             if result.success:
