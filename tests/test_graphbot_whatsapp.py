@@ -130,7 +130,9 @@ class TestOnMessage:
         data = _make_bridge_message(content="What is Python?")
         await channel._on_message(data)
 
-        mock_orchestrator.process.assert_awaited_once_with("What is Python?")
+        mock_orchestrator.process.assert_awaited_once_with(
+            "What is Python?", chat_id="12345@s.whatsapp.net"
+        )
 
     @pytest.mark.asyncio
     async def test_response_includes_output_and_footer(
@@ -236,7 +238,9 @@ class TestHandleBridgeMessage:
         raw = json.dumps(_make_bridge_message(content="routed", message_id="dispatch-1"))
         await channel._handle_bridge_message(raw)
 
-        mock_orchestrator.process.assert_awaited_once_with("routed")
+        mock_orchestrator.process.assert_awaited_once_with(
+            "routed", chat_id="12345@s.whatsapp.net"
+        )
 
     @pytest.mark.asyncio
     async def test_status_connected_sets_flag(

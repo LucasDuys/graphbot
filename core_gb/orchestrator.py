@@ -8,6 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
+from core_gb.conversation import ConversationMemory
 from core_gb.dag_executor import DAGExecutor
 from core_gb.decomposer import Decomposer
 from core_gb.executor import SimpleExecutor
@@ -71,11 +72,14 @@ class Orchestrator:
         self._graph_updater = GraphUpdater(store)
         self._intent_classifier = IntentClassifier()
         self._constitutional_checker = ConstitutionalChecker()
+        self._conversation_memory = ConversationMemory(store)
 
         if self._enable_replan:
             self._dag_executor.set_replan_callback(self._replan_callback)
 
-    async def process(self, message: str) -> ExecutionResult:
+    async def process(
+        self, message: str, chat_id: str | None = None
+    ) -> ExecutionResult:
         """Process a user message end-to-end.
 
         Flow:
@@ -93,9 +97,23 @@ class Orchestrator:
            d. Aggregate results into single ExecutionResult
         5. Update knowledge graph with execution outcome
 
+        Args:
+            message: The user's message text.
+            chat_id: Optional conversation identifier for multi-turn memory.
+                When provided, previous messages for this chat_id are included
+                in the LLM context, and the current exchange is persisted.
+
         Each pipeline stage logs its latency at DEBUG level for profiling.
         """
         pipeline_start = time.perf_counter()
+
+        # ------------------------------------------------------------------
+        # Conversation memory: retrieve history and store incoming message
+        # ------------------------------------------------------------------
+        conversation_history: list[dict[str, str]] = []
+        if chat_id is not None:
+            conversation_history = self._conversation_memory.format_as_messages(chat_id)
+            self._conversation_memory.add_message(chat_id, "user", message)
 
         # ------------------------------------------------------------------
         # Pre-decomposition safety: block obviously harmful messages before
@@ -138,7 +156,7 @@ class Orchestrator:
                     "Pipeline total latency: %.1fms (trivial fast path)",
                     total_ms,
                 )
-                return ExecutionResult(
+                trivial_result = ExecutionResult(
                     root_id="trivial",
                     output=trivial_text,
                     success=True,
@@ -147,6 +165,8 @@ class Orchestrator:
                     total_latency_ms=total_ms,
                     llm_calls=0,
                 )
+                self._store_assistant_response(chat_id, trivial_result)
+                return trivial_result
 
         # ------------------------------------------------------------------
         # Stage 2: Pattern cache check (skip for trivial/simple queries)
@@ -190,6 +210,7 @@ class Orchestrator:
                             )
                         self._graph_updater.update(message, nodes, result)
                         self._log_pipeline_total(pipeline_start, "pattern_hit")
+                        self._store_assistant_response(chat_id, result)
                         return result
 
         # ------------------------------------------------------------------
@@ -205,17 +226,22 @@ class Orchestrator:
                 status=TaskStatus.READY,
             )
             t0 = time.perf_counter()
-            result = await self._executor.execute(message, intake.complexity)
+            result = await self._executor.execute(
+                message, intake.complexity,
+                conversation_history=conversation_history or None,
+            )
             self._log_stage_latency("simple_execute", t0)
             self._graph_updater.update(message, [node], result)
             self._log_pipeline_total(pipeline_start, "simple")
+            self._store_assistant_response(chat_id, result)
             return result
 
         # INTEGRATED tasks: single LLM call with full context, skip decomposition
         if intake.task_type == TaskType.INTEGRATED:
             t0 = time.perf_counter()
             result = await self._executor.execute(
-                message, max(intake.complexity, 3)
+                message, max(intake.complexity, 3),
+                conversation_history=conversation_history or None,
             )
             self._log_stage_latency("integrated_execute", t0)
             node = TaskNode(
@@ -228,6 +254,7 @@ class Orchestrator:
             )
             self._graph_updater.update(message, [node], result)
             self._log_pipeline_total(pipeline_start, "integrated")
+            self._store_assistant_response(chat_id, result)
             return result
 
         # ------------------------------------------------------------------
@@ -269,18 +296,26 @@ class Orchestrator:
 
         if not leaves:
             # Edge case: no leaves found, treat entire message as single task
-            result = await self._executor.execute(message, intake.complexity)
+            result = await self._executor.execute(
+                message, intake.complexity,
+                conversation_history=conversation_history or None,
+            )
             self._graph_updater.update(message, nodes, result)
             self._log_pipeline_total(pipeline_start, "complex_no_leaves")
+            self._store_assistant_response(chat_id, result)
             return result
 
         if len(leaves) == 1:
             # Single leaf: execute directly
             t0 = time.perf_counter()
-            result = await self._execute_single_leaf(leaves[0], message)
+            result = await self._execute_single_leaf(
+                leaves[0], message,
+                conversation_history=conversation_history or None,
+            )
             self._log_stage_latency("single_leaf_execute", t0)
             self._graph_updater.update(message, nodes, result)
             self._log_pipeline_total(pipeline_start, "complex_single_leaf")
+            self._store_assistant_response(chat_id, result)
             return result
 
         t0 = time.perf_counter()
@@ -290,6 +325,7 @@ class Orchestrator:
         self._log_stage_latency("dag_execute", t0)
         self._graph_updater.update(message, nodes, result)
         self._log_pipeline_total(pipeline_start, "complex_dag")
+        self._store_assistant_response(chat_id, result)
         return result
 
     @staticmethod
@@ -306,6 +342,16 @@ class Orchestrator:
             "Pipeline total latency: %.1fms (path: %s)", elapsed_ms, path,
         )
 
+    def _store_assistant_response(
+        self, chat_id: str | None, result: ExecutionResult
+    ) -> None:
+        """Persist the assistant's response in conversation memory.
+
+        No-op when chat_id is None (no conversation tracking).
+        """
+        if chat_id is not None and result.output:
+            self._conversation_memory.add_message(chat_id, "assistant", result.output)
+
     @staticmethod
     def _blocked_result(message: str, reason: str) -> ExecutionResult:
         """Return an error ExecutionResult when the DAG is blocked by safety checks."""
@@ -318,11 +364,17 @@ class Orchestrator:
         )
 
     async def _execute_single_leaf(
-        self, leaf: TaskNode, original_message: str
+        self,
+        leaf: TaskNode,
+        original_message: str,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> ExecutionResult:
         """Execute a single leaf node via SimpleExecutor."""
         task_text = leaf.description or original_message
-        return await self._executor.execute(task_text, leaf.complexity)
+        return await self._executor.execute(
+            task_text, leaf.complexity,
+            conversation_history=conversation_history,
+        )
 
     async def _replan_callback(
         self, event: WaveCompleteEvent

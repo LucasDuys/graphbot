@@ -236,7 +236,7 @@ class GraphBotWhatsAppChannel:
         store, orchestrator = self._ensure_orchestrator()
 
         try:
-            result: ExecutionResult = await orchestrator.process(content)
+            result: ExecutionResult = await orchestrator.process(content, chat_id=chat_id)
             response = result.output + _format_footer(result, store)
         except Exception as exc:
             logger.error("Orchestrator error: {}", exc)

@@ -27,7 +27,11 @@ class SimpleExecutor:
         self._tool_registry = tool_registry
 
     async def execute(
-        self, task: str, complexity: int = 1, provides_keys: list[str] | None = None,
+        self,
+        task: str,
+        complexity: int = 1,
+        provides_keys: list[str] | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
     ) -> ExecutionResult:
         """Execute a single task with graph context.
 
@@ -38,6 +42,14 @@ class SimpleExecutor:
         4. Build messages with context injected at beginning (ADR-009)
         5. Create TaskNode, route to model via ModelRouter
         6. Return ExecutionResult with all metrics
+
+        Args:
+            task: The task description / user message.
+            complexity: Estimated task complexity for model routing.
+            provides_keys: When set, request JSON output with these keys.
+            conversation_history: Optional list of prior conversation messages
+                (dicts with "role" and "content") to inject into the LLM context
+                for multi-turn conversation support.
         """
         start = time.perf_counter()
         root_id = str(uuid.uuid4())
@@ -99,13 +111,17 @@ class SimpleExecutor:
                     "role": "system",
                     "content": f"<context>\n{context_str}\n</context>\n\nYou are a helpful assistant.{json_instruction}",
                 },
-                {"role": "user", "content": task},
             ]
         else:
             messages = [
                 {"role": "system", "content": f"You are a helpful assistant.{json_instruction}"},
-                {"role": "user", "content": task},
             ]
+
+        # Inject conversation history between system and current user message.
+        if conversation_history:
+            messages.extend(conversation_history)
+
+        messages.append({"role": "user", "content": task})
 
         # Step 5: Create TaskNode and route to model
         task_node = TaskNode(
