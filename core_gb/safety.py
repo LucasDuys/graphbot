@@ -3,6 +3,10 @@
 Analyzes a full decomposition plan (list of TaskNodes) before execution begins.
 Catches dangerous shell commands, destructive operations, pipe-to-shell
 patterns, and multi-step composition attacks that could cause harm if executed.
+
+Also provides pre-decomposition text-level scanning via classify_text() to
+block obviously harmful user messages before any LLM calls (zero-cost early
+exit). The existing DAG-level classify_dag() remains as defense-in-depth.
 """
 
 from __future__ import annotations
@@ -58,6 +62,83 @@ DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
     # Fork bomb
     (re.compile(r":\(\)\s*\{", re.IGNORECASE), "fork bomb pattern"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Pre-decomposition intent patterns -- scanned on raw user messages
+# ---------------------------------------------------------------------------
+# These catch high-level harmful intent keywords in user messages before
+# any decomposition or LLM calls happen. Each pattern uses word-boundary
+# anchors and contextual surrounding words to reduce false positives on
+# benign discussions about security topics.
+
+PRE_DECOMPOSITION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Spam / mass unsolicited messaging
+    (re.compile(
+        r"\b(send|blast|deliver|distribute)\b.*\bspam\b",
+        re.IGNORECASE,
+    ), "spam: sending unsolicited bulk messages"),
+    (re.compile(
+        r"\bspam\b.*\b(to|at|across)\b.*\b\d+\b",
+        re.IGNORECASE,
+    ), "spam: targeting bulk recipients"),
+
+    # DDoS / denial of service
+    (re.compile(
+        r"\b(launch|start|execute|run|perform|initiate)\b.*\b(ddos|dos\s+attack|denial.of.service)\b",
+        re.IGNORECASE,
+    ), "DDoS: launching denial-of-service attack"),
+    (re.compile(
+        r"\b(flood|overwhelm|overload)\b.*\b(server|target|service|network|site|website)\b",
+        re.IGNORECASE,
+    ), "DDoS: flooding a target with traffic"),
+
+    # Ransomware / encryption extortion
+    (re.compile(
+        r"\b(encrypt|lock)\b.*\b(files|data|system)\b.*\b(ransom|demand|payment)\b",
+        re.IGNORECASE,
+    ), "ransomware: encrypting data for ransom"),
+    (re.compile(
+        r"\bransomware\b",
+        re.IGNORECASE,
+    ), "ransomware: explicit ransomware reference"),
+
+    # Keylogger / spyware
+    (re.compile(
+        r"\b(install|deploy|set\s*up|run)\b.*\b(keylogger|spyware|trojan|backdoor|rootkit)\b",
+        re.IGNORECASE,
+    ), "malware: installing surveillance or intrusion software"),
+
+    # Phishing (action-oriented)
+    (re.compile(
+        r"\b(create|build|set\s*up|design|make)\b.*\bphishing\b",
+        re.IGNORECASE,
+    ), "phishing: creating deceptive content to steal credentials"),
+
+    # Brute force attacks
+    (re.compile(
+        r"\b(brute\s*force|crack)\b.*\b(password|credential|login|account|admin)\b",
+        re.IGNORECASE,
+    ), "brute force: attempting to crack authentication"),
+
+    # Crypto mining on others' resources
+    (re.compile(
+        r"\b(install|deploy|run)\b.*\b(crypto\s*min\w*|bitcoin\s*min\w*|coin\s*min\w*)\b",
+        re.IGNORECASE,
+    ), "cryptojacking: unauthorized cryptocurrency mining"),
+
+    # Botnet
+    (re.compile(
+        r"\b(create|build|deploy|set\s*up)\b.*\bbotnet\b",
+        re.IGNORECASE,
+    ), "botnet: creating a network of compromised machines"),
+
+    # SQL injection / exploitation
+    (re.compile(
+        r"\b(inject|exploit)\b.*\b(sql|database|vulnerability)\b.*\b(attack|steal|dump)\b",
+        re.IGNORECASE,
+    ), "exploitation: injecting or exploiting database vulnerabilities"),
 ]
 
 
@@ -152,7 +233,47 @@ class IntentClassifier:
 
     def __init__(self) -> None:
         self._patterns = DANGEROUS_PATTERNS
+        self._pre_decomposition_patterns = PRE_DECOMPOSITION_PATTERNS
         self._composition_rules = COMPOSITION_RULES
+
+    def classify_text(self, text: str) -> SafetyVerdict:
+        """Scan raw user message text for dangerous intent before decomposition.
+
+        Runs the message against both DANGEROUS_PATTERNS (shell commands) and
+        PRE_DECOMPOSITION_PATTERNS (high-level harmful intent keywords). This
+        is a zero-cost check -- no LLM calls, no TaskNode construction.
+
+        Args:
+            text: The raw user message string.
+
+        Returns:
+            SafetyVerdict with blocked=True if harmful intent is detected.
+        """
+        if not text:
+            return SafetyVerdict(blocked=False, reason="", flagged_nodes=[])
+
+        reasons: list[str] = []
+
+        # Check against dangerous shell command patterns
+        reasons.extend(self._scan_text(text))
+
+        # Check against pre-decomposition high-level intent patterns
+        for pattern, description in self._pre_decomposition_patterns:
+            if pattern.search(text):
+                reasons.append(description)
+
+        if reasons:
+            combined_reason = "; ".join(reasons)
+            logger.warning(
+                "Pre-decomposition safety block: %s", combined_reason
+            )
+            return SafetyVerdict(
+                blocked=True,
+                reason=combined_reason,
+                flagged_nodes=[],
+            )
+
+        return SafetyVerdict(blocked=False, reason="", flagged_nodes=[])
 
     def classify_dag(self, nodes: list[TaskNode]) -> SafetyVerdict:
         """Classify a full decomposition plan for safety.

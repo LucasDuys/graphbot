@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from core_gb.types import TaskNode
+from core_gb.types import Domain, TaskNode, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -360,10 +360,39 @@ class ConstitutionalChecker:
     Each principle is a callable check function that scans node descriptions
     and tool_params for violations. The checker aggregates all violations
     into a single ConstitutionalVerdict.
+
+    Also provides check_text() for pre-decomposition scanning of raw user
+    messages against all constitutional principles (zero LLM cost).
     """
 
     def __init__(self) -> None:
         self._principles = PRINCIPLES
+
+    def check_text(self, text: str) -> ConstitutionalVerdict:
+        """Check raw user message text against all constitutional principles.
+
+        Wraps the text in a minimal TaskNode and runs all principle checks.
+        This is a zero-cost pre-decomposition check -- no LLM calls needed.
+
+        Args:
+            text: The raw user message string.
+
+        Returns:
+            ConstitutionalVerdict with pass/fail and list of violations.
+        """
+        if not text:
+            return ConstitutionalVerdict(passed=True, violations=[])
+
+        # Wrap text in a minimal TaskNode for principle check compatibility
+        proxy_node = TaskNode(
+            id="__pre_decomposition__",
+            description=text,
+            is_atomic=True,
+            domain=Domain.SYNTHESIS,
+            complexity=1,
+            status=TaskStatus.READY,
+        )
+        return self.check_plan([proxy_node])
 
     def check_plan(self, nodes: list[TaskNode]) -> ConstitutionalVerdict:
         """Check a plan against all constitutional principles.

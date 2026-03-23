@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from pathlib import Path
 
@@ -78,52 +79,122 @@ class Orchestrator:
         """Process a user message end-to-end.
 
         Flow:
+        0. Pre-decomposition safety: scan raw message for harmful intent (zero LLM cost)
         1. IntakeParser.parse(message) -> IntakeResult
+        1b. FAST PATH: trivial queries (greetings, acks) return immediately (<50ms)
         2. Check pattern cache for a match (skip decomposition if hit)
+           -- skipped for complexity=1 (no patterns worth matching)
         3. If simple (is_simple=True): route directly to SimpleExecutor
+           -- skip entity resolution for complexity=1
         4. If complex:
            a. Resolve entities and assemble graph context
            b. Decompose via Decomposer
            c. Execute DAG in parallel via DAGExecutor
            d. Aggregate results into single ExecutionResult
         5. Update knowledge graph with execution outcome
+
+        Each pipeline stage logs its latency at DEBUG level for profiling.
         """
+        pipeline_start = time.perf_counter()
+
+        # ------------------------------------------------------------------
+        # Pre-decomposition safety: block obviously harmful messages before
+        # any LLM calls, pattern matching, or decomposition. This is a
+        # zero-cost regex scan on the raw user input.
+        # ------------------------------------------------------------------
+        t0 = time.perf_counter()
+        pre_safety = self._intent_classifier.classify_text(message)
+        if pre_safety.blocked:
+            return self._blocked_result(message, pre_safety.reason)
+
+        pre_constitutional = self._constitutional_checker.check_text(message)
+        if not pre_constitutional.passed:
+            reasons = "; ".join(
+                f"{name}: {reason}"
+                for name, reason in pre_constitutional.violations
+            )
+            return self._blocked_result(message, reasons)
+        self._log_stage_latency("safety_check", t0)
+
+        # ------------------------------------------------------------------
+        # Stage 1: Intake parse
+        # ------------------------------------------------------------------
+        t0 = time.perf_counter()
         intake = self._intake.parse(message)
+        self._log_stage_latency("intake_parse", t0)
 
-        # Check pattern cache before decomposing
-        patterns = self._pattern_store.load_all()
-        if patterns:
-            match_result = self._pattern_matcher.match(message, patterns)
-            if match_result is not None:
-                pattern, bindings = match_result
-                nodes = self._instantiate_pattern(pattern, bindings)
-                if nodes:
-                    # Safety check on pattern-instantiated DAG
-                    verdict = self._intent_classifier.classify_dag(nodes)
-                    if verdict.blocked:
-                        return self._blocked_result(message, verdict.reason)
+        # ------------------------------------------------------------------
+        # Stage 1b: FAST PATH -- trivial queries (greetings, acks)
+        # Return canned response immediately, skip entire pipeline.
+        # No LLM call, no pattern check, no entity resolution.
+        # ------------------------------------------------------------------
+        if intake.is_trivial:
+            t0 = time.perf_counter()
+            trivial_text = self._intake.trivial_response(intake)
+            if trivial_text is not None:
+                self._log_stage_latency("trivial_fast_path", t0)
+                total_ms = (time.perf_counter() - pipeline_start) * 1000
+                logger.debug(
+                    "Pipeline total latency: %.1fms (trivial fast path)",
+                    total_ms,
+                )
+                return ExecutionResult(
+                    root_id="trivial",
+                    output=trivial_text,
+                    success=True,
+                    total_nodes=0,
+                    total_tokens=0,
+                    total_latency_ms=total_ms,
+                    llm_calls=0,
+                )
 
-                    # Constitutional check on pattern-instantiated DAG
-                    const_verdict = self._constitutional_checker.check_plan(nodes)
-                    if not const_verdict.passed:
-                        reasons = "; ".join(
-                            f"{name}: {reason}"
-                            for name, reason in const_verdict.violations
-                        )
-                        return self._blocked_result(message, reasons)
+        # ------------------------------------------------------------------
+        # Stage 2: Pattern cache check (skip for trivial/simple queries)
+        # Only load patterns when complexity > 1 -- simple queries never
+        # match patterns worth caching.
+        # ------------------------------------------------------------------
+        if intake.complexity > 1:
+            t0 = time.perf_counter()
+            patterns = self._pattern_store.load_all()
+            self._log_stage_latency("pattern_load", t0)
+            if patterns:
+                t0 = time.perf_counter()
+                match_result = self._pattern_matcher.match(message, patterns)
+                self._log_stage_latency("pattern_match", t0)
+                if match_result is not None:
+                    pattern, bindings = match_result
+                    nodes = self._instantiate_pattern(pattern, bindings)
+                    if nodes:
+                        # Safety check on pattern-instantiated DAG
+                        verdict = self._intent_classifier.classify_dag(nodes)
+                        if verdict.blocked:
+                            return self._blocked_result(message, verdict.reason)
 
-                    self._pattern_store.increment_usage(pattern.id)
-                    logger.info("Pattern cache hit: %s", pattern.trigger[:60])
-                    leaves = [n for n in nodes if n.is_atomic]
-                    if len(leaves) > 1:
-                        result = await self._dag_executor.execute(nodes)
-                    else:
-                        result = await self._execute_single_leaf(
-                            nodes[0], message
-                        )
-                    self._graph_updater.update(message, nodes, result)
-                    return result
+                        # Constitutional check on pattern-instantiated DAG
+                        const_verdict = self._constitutional_checker.check_plan(nodes)
+                        if not const_verdict.passed:
+                            reasons = "; ".join(
+                                f"{name}: {reason}"
+                                for name, reason in const_verdict.violations
+                            )
+                            return self._blocked_result(message, reasons)
 
+                        self._pattern_store.increment_usage(pattern.id)
+                        logger.info("Pattern cache hit: %s", pattern.trigger[:60])
+                        leaves = [n for n in nodes if n.is_atomic]
+                        if len(leaves) > 1:
+                            result = await self._dag_executor.execute(nodes)
+                        else:
+                            result = await self._execute_single_leaf(
+                                nodes[0], message
+                            )
+                        self._graph_updater.update(message, nodes, result)
+                        self._log_pipeline_total(pipeline_start, "pattern_hit")
+                        return result
+
+        # ------------------------------------------------------------------
+        # Stage 3: Simple task -- skip entity resolution for complexity=1
+        # ------------------------------------------------------------------
         if intake.is_simple:
             node = TaskNode(
                 id=str(uuid.uuid4()),
@@ -133,15 +204,20 @@ class Orchestrator:
                 complexity=intake.complexity,
                 status=TaskStatus.READY,
             )
+            t0 = time.perf_counter()
             result = await self._executor.execute(message, intake.complexity)
+            self._log_stage_latency("simple_execute", t0)
             self._graph_updater.update(message, [node], result)
+            self._log_pipeline_total(pipeline_start, "simple")
             return result
 
         # INTEGRATED tasks: single LLM call with full context, skip decomposition
         if intake.task_type == TaskType.INTEGRATED:
+            t0 = time.perf_counter()
             result = await self._executor.execute(
                 message, max(intake.complexity, 3)
             )
+            self._log_stage_latency("integrated_execute", t0)
             node = TaskNode(
                 id=str(uuid.uuid4()),
                 description=message,
@@ -151,20 +227,28 @@ class Orchestrator:
                 status=TaskStatus.READY,
             )
             self._graph_updater.update(message, [node], result)
+            self._log_pipeline_total(pipeline_start, "integrated")
             return result
 
-        # Complex path: resolve entities, get context, decompose, execute
-        # Applies to DATA_PARALLEL, SEQUENTIAL, and non-simple ATOMIC tasks
+        # ------------------------------------------------------------------
+        # Stage 4: Complex path -- resolve entities, get context, decompose
+        # ------------------------------------------------------------------
+        t0 = time.perf_counter()
         entity_ids: list[str] = []
         for entity in intake.entities:
             matches = self._resolver.resolve(entity, top_k=1)
             for eid, confidence in matches:
                 if confidence > 0.5 and eid not in entity_ids:
                     entity_ids.append(eid)
+        self._log_stage_latency("entity_resolution", t0)
 
+        t0 = time.perf_counter()
         context = self._store.get_context(entity_ids) if entity_ids else None
+        self._log_stage_latency("context_assembly", t0)
 
+        t0 = time.perf_counter()
         nodes = await self._decomposer.decompose(message, context)
+        self._log_stage_latency("decompose", t0)
 
         # Safety check on decomposed DAG before execution
         verdict = self._intent_classifier.classify_dag(nodes)
@@ -187,18 +271,39 @@ class Orchestrator:
             # Edge case: no leaves found, treat entire message as single task
             result = await self._executor.execute(message, intake.complexity)
             self._graph_updater.update(message, nodes, result)
+            self._log_pipeline_total(pipeline_start, "complex_no_leaves")
             return result
 
         if len(leaves) == 1:
             # Single leaf: execute directly
+            t0 = time.perf_counter()
             result = await self._execute_single_leaf(leaves[0], message)
+            self._log_stage_latency("single_leaf_execute", t0)
             self._graph_updater.update(message, nodes, result)
+            self._log_pipeline_total(pipeline_start, "complex_single_leaf")
             return result
 
+        t0 = time.perf_counter()
         self._dag_executor.aggregation_template = self._decomposer.last_template
         result = await self._dag_executor.execute(nodes)
+        self._log_stage_latency("dag_execute", t0)
         self._graph_updater.update(message, nodes, result)
+        self._log_pipeline_total(pipeline_start, "complex_dag")
         return result
+
+    @staticmethod
+    def _log_stage_latency(stage: str, start: float) -> None:
+        """Log the latency of a pipeline stage at DEBUG level."""
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.debug("Pipeline stage [%s] latency: %.1fms", stage, elapsed_ms)
+
+    @staticmethod
+    def _log_pipeline_total(start: float, path: str) -> None:
+        """Log the total pipeline latency at DEBUG level."""
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.debug(
+            "Pipeline total latency: %.1fms (path: %s)", elapsed_ms, path,
+        )
 
     @staticmethod
     def _blocked_result(message: str, reason: str) -> ExecutionResult:
