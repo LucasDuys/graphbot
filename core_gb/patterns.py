@@ -10,7 +10,7 @@ from datetime import datetime
 
 import Levenshtein
 
-from core_gb.types import ExecutionResult, Pattern, TaskNode
+from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode
 from graph.store import GraphStore
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,14 @@ class PatternMatcher:
     1. Regex-based structural matching (exact template match with slot extraction)
     2. Levenshtein similarity on structural text
     3. Semantic embedding similarity (requires an EmbeddingService)
+
+    Domain scoping: when a domain is provided, only patterns whose
+    source_domain matches or is "general" are considered. This prevents
+    cross-domain cache pollution (e.g., shell patterns matching creative tasks).
+
+    Slot validation: after matching, any pattern with variable_slots that
+    could not be fully filled via regex extraction is rejected. This forces
+    decomposition rather than producing output with unfilled slot placeholders.
 
     Args:
         embedding_service: Optional EmbeddingService for semantic matching.
@@ -67,24 +75,45 @@ class PatternMatcher:
         return pattern.success_count / total
 
     def match(
-        self, task: str, patterns: list[Pattern], threshold: float = 0.7
+        self,
+        task: str,
+        patterns: list[Pattern],
+        threshold: float = 0.7,
+        domain: str | None = None,
     ) -> tuple[Pattern, dict[str, str]] | None:
         """Match a task against cached patterns.
 
         Returns (pattern, variable_bindings) or None if no match.
         variable_bindings maps slot names to extracted values.
 
+        Args:
+            task: The task description to match against patterns.
+            patterns: List of candidate patterns to score.
+            threshold: Minimum weighted score for a match to be accepted.
+            domain: When provided, only patterns whose source_domain matches
+                this value or is "general" are considered. Prevents
+                cross-domain cache pollution.
+
         Matching strategy:
-        1. For each pattern, try to match the trigger template against the task
-        2. Extract variable bindings from slots ({slot_0}, {slot_1}, etc.)
-        3. Compute similarity between the structural parts
-        4. Weight the raw score by the pattern's success rate factor
-        5. Deprioritize patterns with success_rate < 20%:
+        1. Filter patterns by domain (if specified)
+        2. For each pattern, try to match the trigger template against the task
+        3. Extract variable bindings from slots ({slot_0}, {slot_1}, etc.)
+        4. Reject patterns with unfilled slots (force decomposition)
+        5. Compute similarity between the structural parts
+        6. Weight the raw score by the pattern's success rate factor
+        7. Deprioritize patterns with success_rate < 20%:
            - 0% success rate (all failures): always skip (force decomposition)
            - <20% with alternatives: skip in favor of better patterns
            - <20% with no alternatives: return with warning
-        6. Return best match above threshold
+        8. Return best match above threshold
         """
+        # --- Domain scoping ---
+        if domain is not None:
+            patterns = [
+                p for p in patterns
+                if p.source_domain == domain or p.source_domain == "general"
+            ]
+
         best_match: Pattern | None = None
         best_score = 0.0
         best_bindings: dict[str, str] = {}
@@ -109,6 +138,21 @@ class PatternMatcher:
 
             raw_score, bindings = self._score_match(task, pattern)
             weighted_score = raw_score * self._success_rate_factor(pattern)
+
+            # --- Unfilled slot validation ---
+            # If the pattern declares variable slots but they were not all
+            # filled by regex extraction, reject the match. This prevents
+            # producing output with unfilled slot placeholders like
+            # "[No data for python_version]".
+            if pattern.variable_slots and not self._slots_filled(
+                pattern, bindings
+            ):
+                logger.debug(
+                    "Rejecting pattern %s: unfilled slots %s",
+                    pattern.id,
+                    set(pattern.variable_slots) - set(bindings.keys()),
+                )
+                continue
 
             # Low success rate (<20%): track as fallback but do not select
             # as best match -- prefer alternatives if they exist
@@ -146,6 +190,21 @@ class PatternMatcher:
             return low_rate_fallback, low_rate_fallback_bindings
 
         return None
+
+    @staticmethod
+    def _slots_filled(pattern: Pattern, bindings: dict[str, str]) -> bool:
+        """Check whether all variable slots have been filled by extraction.
+
+        Returns True if the pattern has no variable slots or all slots have
+        corresponding non-empty bindings. Returns False if any slot is
+        missing or empty.
+        """
+        if not pattern.variable_slots:
+            return True
+        for slot in pattern.variable_slots:
+            if slot not in bindings or not bindings[slot]:
+                return False
+        return True
 
     def _score_match(
         self, task: str, pattern: Pattern
@@ -230,7 +289,21 @@ class PatternMatcher:
 
 
 class PatternExtractor:
-    """Extracts reusable execution templates from completed task trees."""
+    """Extracts reusable execution templates from completed task trees.
+
+    Domain blocklist: tasks whose atomic leaves execute in tool-dependent
+    domains (CODE, BROWSER) are excluded from pattern extraction. Their
+    outputs are environment-specific and would cause cache pollution if
+    generalized into reusable templates.
+    """
+
+    # Domains whose outputs depend on external tool execution and should
+    # never produce reusable patterns. CODE maps to shell execution in the
+    # tool registry; BROWSER performs live web scraping.
+    NON_CACHEABLE_DOMAINS: frozenset[Domain] = frozenset({
+        Domain.CODE,
+        Domain.BROWSER,
+    })
 
     def extract(
         self,
@@ -243,6 +316,7 @@ class PatternExtractor:
         Returns None if:
         - Execution failed
         - Only 1 leaf node (not worth caching)
+        - Any atomic leaf is in a non-cacheable domain (CODE, BROWSER)
         - Cannot generalize the task
         """
         if not result.success:
@@ -251,6 +325,20 @@ class PatternExtractor:
         leaf_nodes = [n for n in nodes if n.is_atomic]
         if len(leaf_nodes) < 2:
             return None
+
+        # --- Domain blocklist ---
+        leaf_domains = {n.domain for n in leaf_nodes}
+        blocked = leaf_domains & self.NON_CACHEABLE_DOMAINS
+        if blocked:
+            logger.info(
+                "Skipping pattern extraction: non-cacheable domain(s) %s "
+                "in atomic leaves",
+                {d.value for d in blocked},
+            )
+            return None
+
+        # Determine the primary source domain from the atomic leaves
+        source_domain = self._determine_source_domain(leaf_nodes)
 
         trigger, slots, bindings = self._generalize(task, leaf_nodes)
 
@@ -265,7 +353,26 @@ class PatternExtractor:
             success_count=1,
             avg_tokens=float(result.total_tokens),
             avg_latency_ms=result.total_latency_ms,
+            source_domain=source_domain,
         )
+
+    @staticmethod
+    def _determine_source_domain(leaf_nodes: list[TaskNode]) -> str:
+        """Determine the primary domain for a set of leaf nodes.
+
+        If all non-SYNTHESIS leaves share a single domain, that domain is
+        used. If leaves span multiple non-SYNTHESIS domains, falls back to
+        "general". Pure SYNTHESIS tasks return "synthesis".
+        """
+        non_synthesis = {
+            n.domain.value for n in leaf_nodes
+            if n.domain != Domain.SYNTHESIS
+        }
+        if len(non_synthesis) == 1:
+            return non_synthesis.pop()
+        if len(non_synthesis) == 0:
+            return "synthesis"
+        return "general"
 
     def _generalize(
         self,
@@ -341,13 +448,50 @@ class PatternExtractor:
 
 
 class PatternStore:
-    """Stores and retrieves patterns from the knowledge graph."""
+    """Stores and retrieves patterns from the knowledge graph.
+
+    Implements lazy-load caching: patterns are loaded from the graph once
+    and cached in memory. The cache is invalidated on save, delete,
+    increment_usage, and increment_failure operations (which modify graph
+    state).
+
+    Pollution purge: purge_polluted() scans all patterns and removes those
+    containing shell-specific markers, unfilled slot indicators, or other
+    artifacts that indicate the pattern was extracted from a tool-dependent
+    execution and should not be reused.
+    """
+
+    # Markers that indicate a pattern was extracted from tool-dependent
+    # execution and should not be reused. Checked by purge_polluted().
+    POLLUTION_MARKERS: tuple[str, ...] = (
+        "python_version",
+        "pip_version",
+        "node_version",
+        "shell",
+        "bash",
+        "terminal",
+        "cmd",
+        "/usr/",
+        "/bin/",
+        "pip install",
+        "npm ",
+        "git ",
+        ".exe",
+        ".sh",
+        "sudo",
+        "chmod",
+        "[no data for",
+    )
 
     def __init__(self, store: GraphStore) -> None:
         self._store = store
+        self._cache: list[Pattern] | None = None
 
     def save(self, pattern: Pattern) -> str:
-        """Save a pattern to the graph. Returns the pattern ID."""
+        """Save a pattern to the graph. Returns the pattern ID.
+
+        Invalidates the in-memory cache so the next load_all() re-queries.
+        """
         props: dict[str, object] = {
             "id": pattern.id,
             "trigger_template": pattern.trigger,
@@ -358,12 +502,24 @@ class PatternStore:
             "avg_tokens": pattern.avg_tokens,
             "avg_latency_ms": pattern.avg_latency_ms,
             "tree_template": pattern.tree_template,
+            "source_domain": pattern.source_domain,
             "created_at": datetime.now(),
         }
-        return self._store.create_node("PatternNode", props)
+        result = self._store.create_node("PatternNode", props)
+        self._cache = None  # Invalidate cache on mutation
+        return result
 
     def load_all(self) -> list[Pattern]:
-        """Retrieve all patterns from the graph."""
+        """Retrieve all patterns from the graph, with lazy-load caching.
+
+        Results are cached in memory. Subsequent calls return the cached
+        list without querying the graph. The cache is invalidated by
+        save(), delete(), increment_usage(), increment_failure(), or
+        invalidate_cache().
+        """
+        if self._cache is not None:
+            return self._cache
+
         rows = self._store.query("MATCH (p:PatternNode) RETURN p.*")
         patterns: list[Pattern] = []
         for row in rows:
@@ -378,11 +534,60 @@ class PatternStore:
                 failure_count=int(row.get("p.failure_count") or 0),
                 avg_tokens=float(row.get("p.avg_tokens", 0.0)),
                 avg_latency_ms=float(row.get("p.avg_latency_ms", 0.0)),
+                source_domain=str(row.get("p.source_domain") or "general"),
             ))
+        self._cache = patterns
         return patterns
 
+    def delete(self, pattern_id: str) -> bool:
+        """Delete a single pattern by ID. Returns True if it existed.
+
+        Invalidates the in-memory cache so the next load_all() re-queries.
+        """
+        result = self._store.delete_node("PatternNode", pattern_id)
+        self._cache = None  # Invalidate cache on mutation
+        return result
+
+    def purge_polluted(self) -> int:
+        """Remove patterns with pollution markers from the store.
+
+        Scans all patterns and deletes any whose tree_template or trigger
+        contains known pollution indicators (shell commands, file paths,
+        unfilled slot syntax, etc.).
+
+        Returns the number of patterns purged.
+        """
+        patterns = self.load_all()
+        purged = 0
+        for pattern in patterns:
+            template_lower = pattern.tree_template.lower()
+            trigger_lower = pattern.trigger.lower()
+            combined = template_lower + " " + trigger_lower
+
+            if any(marker in combined for marker in self.POLLUTION_MARKERS):
+                logger.info(
+                    "Purging polluted pattern %s: %s",
+                    pattern.id,
+                    pattern.description,
+                )
+                self.delete(pattern.id)
+                purged += 1
+
+        if purged > 0:
+            logger.warning(
+                "Purged %d polluted pattern(s) from cache", purged
+            )
+        return purged
+
+    def invalidate_cache(self) -> None:
+        """Force the next load_all() to re-query the graph."""
+        self._cache = None
+
     def increment_usage(self, pattern_id: str) -> None:
-        """Increment success count and update last_used timestamp."""
+        """Increment success count and update last_used timestamp.
+
+        Invalidates the in-memory cache so the next load_all() re-queries.
+        """
         node = self._store.get_node("PatternNode", pattern_id)
         if node is None:
             return
@@ -391,9 +596,13 @@ class PatternStore:
             "success_count": current_count + 1,
             "last_used": datetime.now(),
         })
+        self._cache = None  # Invalidate cache on mutation
 
     def increment_failure(self, pattern_id: str) -> None:
-        """Increment failure count and update last_used timestamp."""
+        """Increment failure count and update last_used timestamp.
+
+        Invalidates the in-memory cache so the next load_all() re-queries.
+        """
         node = self._store.get_node("PatternNode", pattern_id)
         if node is None:
             return
@@ -402,3 +611,4 @@ class PatternStore:
             "failure_count": current_count + 1,
             "last_used": datetime.now(),
         })
+        self._cache = None  # Invalidate cache on mutation

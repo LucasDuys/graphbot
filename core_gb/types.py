@@ -189,7 +189,14 @@ class Reflection:
 
 @dataclass(frozen=True)
 class Pattern:
-    """A reusable execution tree template extracted from completed tasks."""
+    """A reusable execution tree template extracted from completed tasks.
+
+    Attributes:
+        source_domain: The primary domain of the task that produced this
+            pattern. Used for domain-scoped matching to prevent cross-domain
+            pollution. Defaults to "general" for patterns without a specific
+            domain origin.
+    """
 
     id: str
     trigger: str
@@ -200,6 +207,7 @@ class Pattern:
     failure_count: int = 0
     avg_tokens: float = 0.0
     avg_latency_ms: float = 0.0
+    source_domain: str = "general"
     created_at: datetime = field(default_factory=datetime.now)
     last_used: datetime | None = None
 

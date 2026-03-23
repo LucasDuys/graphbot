@@ -70,6 +70,7 @@ NODE_TYPES: list[NodeType] = [
         "variable_slots": "STRING", "tree_template": "STRING", "success_count": "INT64",
         "failure_count": "INT64",
         "avg_tokens": "DOUBLE", "avg_latency_ms": "DOUBLE",
+        "source_domain": "STRING",
         "created_at": "TIMESTAMP", "last_used": "TIMESTAMP",
         "access_count": "INT64", "last_accessed": "TIMESTAMP",
     }),

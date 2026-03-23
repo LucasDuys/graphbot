@@ -215,7 +215,9 @@ class TestPatternExtractor:
             assert "domain" in entry
             assert "is_atomic" in entry
 
-    def test_extract_sequential_tree(self) -> None:
+    def test_extract_sequential_tree_with_code_domain_blocked(self) -> None:
+        """Sequential trees with CODE-domain leaves are blocked from pattern
+        extraction (T179: domain blocklist prevents cache pollution)."""
         nodes = _make_sequential_tree()
         result = ExecutionResult(
             root_id="root",
@@ -233,10 +235,5 @@ class TestPatternExtractor:
             result=result,
         )
 
-        assert pattern is not None
-        assert isinstance(pattern, Pattern)
-        assert pattern.success_count == 1
-        assert pattern.avg_tokens == 200.0
-        assert pattern.avg_latency_ms == 600.0
-        parsed = json.loads(pattern.tree_template)
-        assert len(parsed) == 4
+        # CODE-domain leaves are in the non-cacheable blocklist
+        assert pattern is None
