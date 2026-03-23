@@ -33,7 +33,7 @@ class TestExecutionResultFields:
 class TestDAGCountsToolNodes:
     """Verify _aggregate_results counts tool vs LLM nodes correctly."""
 
-    def test_dag_counts_tool_nodes(self) -> None:
+    async def test_dag_counts_tool_nodes(self) -> None:
         from core_gb.dag_executor import DAGExecutor
 
         mock_executor = MagicMock()
@@ -65,12 +65,12 @@ class TestDAGCountsToolNodes:
         node_by_id = {n.id: n for n in leaves}
         start = time.perf_counter()
 
-        aggregated = dag._aggregate_results("root", leaves, results, node_by_id, start)
+        aggregated = await dag._aggregate_results("root", leaves, results, node_by_id, start)
 
         assert aggregated.tools_used == 2
         assert aggregated.llm_calls == 1
 
-    def test_dag_counts_zero_when_no_results(self) -> None:
+    async def test_dag_counts_zero_when_no_results(self) -> None:
         from core_gb.dag_executor import DAGExecutor
 
         mock_executor = MagicMock()
@@ -79,7 +79,7 @@ class TestDAGCountsToolNodes:
         import time
         start = time.perf_counter()
 
-        aggregated = dag._aggregate_results("root", [], {}, {}, start)
+        aggregated = await dag._aggregate_results("root", [], {}, {}, start)
 
         assert aggregated.tools_used == 0
         assert aggregated.llm_calls == 0

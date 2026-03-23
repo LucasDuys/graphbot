@@ -285,6 +285,7 @@ class Orchestrator:
 
         t0 = time.perf_counter()
         self._dag_executor.aggregation_template = self._decomposer.last_template
+        self._dag_executor.original_question = message
         result = await self._dag_executor.execute(nodes)
         self._log_stage_latency("dag_execute", t0)
         self._graph_updater.update(message, nodes, result)

@@ -19,7 +19,7 @@ from core_gb.wave_event import WaveCompleteEvent
 
 import re
 
-from core_gb.aggregator import Aggregator
+from core_gb.aggregator import Aggregator, strip_json_artifacts
 from core_gb.autonomy import AutonomyLevel, RiskScorer
 from core_gb.sanitizer import OutputSanitizer
 from core_gb.transaction import Snapshot, SnapshotType, TransactionManager
@@ -58,7 +58,10 @@ class DAGExecutor:
         self._on_wave_complete: list[Callable[[WaveCompleteEvent], None]] = (
             on_wave_complete if on_wave_complete is not None else []
         )
-        self._aggregator = Aggregator()
+        self._router: ModelRouter | None = router
+        self._aggregator = Aggregator(
+            router=router,
+        )
         self._sanitizer = OutputSanitizer()
         self._verification_config = verification_config or VerificationConfig()
         self._verifier = VerificationLayer1()
@@ -77,6 +80,7 @@ class DAGExecutor:
         self._decomposer: Decomposer | None = None
         self._max_expansion_depth: int = max_expansion_depth
         self.aggregation_template: dict | None = None
+        self.original_question: str = ""
         self._on_replan: (
             Callable[[WaveCompleteEvent], Awaitable[list[TaskNode] | None]] | None
         ) = None
@@ -512,7 +516,7 @@ class DAGExecutor:
                 node_by_id[replan_id] = replan_node
                 combined_leaves.append(replan_node)
 
-                result = self._aggregate_results(
+                result = await self._aggregate_results(
                     root_id,
                     combined_leaves,
                     results,
@@ -528,7 +532,7 @@ class DAGExecutor:
             n for n in dispatch_nodes
             if n.id not in skipped_ids and n.id not in loop_registry
         ]
-        result = self._aggregate_results(
+        result = await self._aggregate_results(
             root_id, active_leaves, results, node_by_id, start,
         )
         # Attach the cumulative expansion count
@@ -1316,7 +1320,7 @@ class DAGExecutor:
         for child_id in node.children:
             self._collect_leaf_deps(child_id, node_by_id, leaf_set, out)
 
-    def _aggregate_results(
+    async def _aggregate_results(
         self,
         root_id: str,
         leaves: list[TaskNode],
@@ -1324,7 +1328,13 @@ class DAGExecutor:
         node_by_id: dict[str, TaskNode],
         start: float,
     ) -> ExecutionResult:
-        """Combine results from all leaf executions into a single ExecutionResult."""
+        """Combine results from all leaf executions into a single ExecutionResult.
+
+        When an original_question is set and the number of leaf outputs meets
+        the synthesis threshold, uses LLM synthesis to produce coherent prose.
+        Otherwise, falls back to deterministic aggregation with JSON artifact
+        cleanup.
+        """
         if not results:
             elapsed_ms = (time.perf_counter() - start) * 1000
             return ExecutionResult(
@@ -1364,7 +1374,7 @@ class DAGExecutor:
             elif r.total_tokens > 0:
                 llm_count += 1
 
-        # Build leaf_outputs dict for the deterministic aggregator
+        # Build leaf_outputs dict for aggregation
         # Sanitize all outputs before aggregation to prevent injection in final result
         leaf_outputs: dict[str, str] = {}
         for leaf in leaves:
@@ -1393,9 +1403,25 @@ class DAGExecutor:
             else:
                 leaf_outputs[f"output_{leaf.id}"] = sanitized_output
 
-        aggregated = self._aggregator.aggregate(
-            self.aggregation_template, leaf_outputs
-        )
+        # Strip JSON artifacts from all leaf outputs before aggregation.
+        # This ensures clean output regardless of aggregation path.
+        leaf_outputs = {
+            key: strip_json_artifacts(value)
+            for key, value in leaf_outputs.items()
+        }
+
+        # Use LLM synthesis when original_question is available, otherwise
+        # fall back to deterministic aggregation
+        if self.original_question:
+            aggregated = await self._aggregator.synthesize(
+                original_question=self.original_question,
+                leaf_outputs=leaf_outputs,
+                template=self.aggregation_template,
+            )
+        else:
+            aggregated = self._aggregator.aggregate(
+                self.aggregation_template, leaf_outputs
+            )
 
         elapsed_ms = (time.perf_counter() - start) * 1000
 
