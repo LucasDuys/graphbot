@@ -55,10 +55,39 @@ class IntakeResult:
     is_simple: bool
     raw_message: str
     task_type: TaskType = TaskType.ATOMIC
+    is_trivial: bool = False
 
 
 class IntakeParser:
     """Zero-cost, zero-token intent classification via pattern matching."""
+
+    # Trivial query patterns: greetings, acknowledgments, single-word responses.
+    # These are intercepted before ANY pipeline stage and return canned responses
+    # in <50ms. No LLM call, no pattern check, no entity resolution.
+    _TRIVIAL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+        # Greetings
+        (re.compile(r"^(?:hi|hello|hey|howdy|yo|sup|hiya)(?:\s+there)?[!.?]*$", re.IGNORECASE),
+         "greeting"),
+        (re.compile(r"^good\s+(?:morning|afternoon|evening|night|day)[!.?]*$", re.IGNORECASE),
+         "greeting"),
+        # Acknowledgments
+        (re.compile(r"^(?:thanks|thank\s+you|thx|ty|cheers)[!.?]*$", re.IGNORECASE),
+         "thanks"),
+        # Affirmatives / negatives
+        (re.compile(r"^(?:ok|okay|sure|yep|yup|yes|yeah|nope|nah|no)[!.?]*$", re.IGNORECASE),
+         "ack"),
+        # Farewells
+        (re.compile(r"^(?:bye|goodbye|see\s+you|later|cya)[!.?]*$", re.IGNORECASE),
+         "farewell"),
+    ]
+
+    # Canned responses for trivial query categories.
+    _TRIVIAL_RESPONSES: dict[str, str] = {
+        "greeting": "Hello! How can I help you?",
+        "thanks": "You're welcome! Let me know if you need anything else.",
+        "ack": "Got it.",
+        "farewell": "Goodbye! Feel free to come back anytime.",
+    }
 
     DOMAIN_KEYWORDS: dict[Domain, set[str]] = {
         Domain.FILE: {
@@ -71,9 +100,9 @@ class IntakeParser:
             "weather", "news", "download", "api", "web",
         },
         Domain.CODE: {
-            "code", "function", "class", "bug", "fix", "refactor", "test",
-            "compile", "run", "debug", "implement", "script", "program",
-            "python", "javascript",
+            "bug", "fix", "refactor", "compile", "run", "debug", "script",
+            "execute", "shell", "command", "git", "pytest", "pip", "test",
+            "edit", "patch", "lint",
         },
         Domain.COMMS: {
             "email", "message", "send", "notify", "slack", "chat", "reply",
@@ -93,7 +122,12 @@ class IntakeParser:
         """Classify message intent without any LLM calls.
 
         Returns IntakeResult with domain, complexity estimate, extracted entities.
+        Trivial queries (greetings, acknowledgments) are flagged via is_trivial
+        for immediate response without entering the pipeline.
         """
+        # Fast path: check for trivial queries first (< 1ms)
+        is_trivial = self._is_trivial(message)
+
         domain = self._classify_domain(message)
         complexity = self._estimate_complexity(message)
         entities = self._extract_entities(message)
@@ -110,20 +144,59 @@ class IntakeParser:
             is_simple=is_simple,
             raw_message=message,
             task_type=task_type,
+            is_trivial=is_trivial,
         )
+
+    def _is_trivial(self, message: str) -> bool:
+        """Check if the message matches a trivial query pattern.
+
+        Trivial queries are greetings, acknowledgments, and single-word
+        responses that can be answered with a canned response in <50ms.
+        """
+        stripped = message.strip()
+        if not stripped:
+            return False
+        for pattern, _category in self._TRIVIAL_PATTERNS:
+            if pattern.match(stripped):
+                return True
+        return False
+
+    def trivial_response(self, intake: IntakeResult) -> str | None:
+        """Return a canned response for trivial queries, or None if not trivial.
+
+        This method is intended to be called after parse(). If the IntakeResult
+        has is_trivial=True, returns the appropriate canned response string.
+        If is_trivial=False, returns None.
+        """
+        if not intake.is_trivial:
+            return None
+        stripped = intake.raw_message.strip()
+        for pattern, category in self._TRIVIAL_PATTERNS:
+            if pattern.match(stripped):
+                return self._TRIVIAL_RESPONSES.get(category, "Got it.")
+        return None
+
+    # Domains where substring matching is allowed (e.g. "http" inside a URL).
+    # CODE domain uses word-level matching only to avoid false positives like
+    # "script" matching inside "JavaScript".
+    _SUBSTR_MATCH_DOMAINS: frozenset[Domain] = frozenset({
+        Domain.WEB, Domain.FILE,
+    })
 
     def _classify_domain(self, message: str) -> Domain:
         """Count keyword matches per domain, pick highest. Tie-break: SYNTHESIS."""
         lower = message.lower()
         words = set(re.findall(r"[a-z]+", lower))
-        # Also check for substring matches (e.g. "http" in a URL)
+        # Substring matching only for domains that need it (WEB for URLs, FILE
+        # for file extensions). CODE uses strict word matching to avoid false
+        # positives like "script" inside "JavaScript".
         scores: dict[Domain, int] = {}
         for domain, keywords in self.DOMAIN_KEYWORDS.items():
             score = 0
             for kw in keywords:
                 if kw in words:
                     score += 1
-                elif kw in lower:
+                elif domain in self._SUBSTR_MATCH_DOMAINS and kw in lower:
                     score += 1
             scores[domain] = score
 

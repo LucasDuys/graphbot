@@ -197,7 +197,23 @@ class ToolRegistry:
                     )
                     return agent_result
             elif domain == Domain.CODE:
-                result_data = await self._execute_shell(node)
+                code_route = self._classify_code_task(node)
+                if code_route == "edit" and self._code_agent:
+                    # Code edit request -- route to CodeEditAgent.
+                    path = self._extract_file_path(node.description)
+                    agent_result = await self._code_agent.edit(
+                        node.description, path,
+                    )
+                    return agent_result
+                elif code_route == "shell":
+                    # Explicit shell/run command -- use ShellTool.
+                    result_data = await self._execute_shell(node)
+                else:
+                    # Code generation or question -- skip tool, let LLM handle.
+                    result = self._no_tool_result(node, start)
+                    elapsed = result.total_latency_ms
+                    self._record_stat(domain.value, False, elapsed)
+                    return result
             elif domain == Domain.BROWSER:
                 result_data = await self._execute_browser(node)
             else:
@@ -292,6 +308,18 @@ class ToolRegistry:
                 result_data = await self._browser.fill(
                     params.get("selector", ""), params.get("value", "")
                 )
+            elif method == "code_generate":
+                # Code generation goes directly to LLM -- skip tool attempt.
+                return None
+            elif method == "code_edit":
+                if self._code_agent:
+                    path = params.get("path", "")
+                    agent_result = await self._code_agent.edit(
+                        node.description, path,
+                    )
+                    return agent_result
+                # No code agent available -- fall back to LLM.
+                return None
             elif method == "llm_reason":
                 return None
             else:
@@ -453,6 +481,59 @@ class ToolRegistry:
                 return text.strip().strip("'\"")
 
         return text
+
+    @staticmethod
+    def _classify_code_task(node: TaskNode) -> str:
+        """Classify a CODE domain task into 'edit', 'shell', or 'generate'.
+
+        Returns:
+            'edit'     -- task requests modifying an existing file (edit, fix, refactor).
+            'shell'    -- task requests running a shell command (run, execute, git, pytest).
+            'generate' -- task is code generation or a code question (LLM-only).
+        """
+        desc = node.description.lower()
+
+        # Shell indicators: explicit command, backtick-quoted, or run/execute prefix.
+        shell_signals = [
+            "run ", "run the", "execute ", "git ", "pytest ", "pip ",
+            "shell ", "command ", "terminal",
+        ]
+        if re.search(r'`[^`]+`', node.description):
+            return "shell"
+        if any(signal in desc for signal in shell_signals):
+            return "shell"
+
+        # Edit indicators: modifying an existing file.
+        edit_signals = [
+            "edit ", "fix ", "refactor ", "patch ", "modify ", "change ",
+            "update ", "replace ", "debug ", "rewrite ",
+        ]
+        # Also check for file path patterns (e.g., "main.py", "src/app.js")
+        has_file_path = bool(re.search(r'\S+\.\w{1,5}', node.description))
+        if any(signal in desc for signal in edit_signals):
+            return "edit"
+        if has_file_path and any(kw in desc for kw in ["implement", "add", "in "]):
+            return "edit"
+
+        # Default: code generation or question -- skip tool.
+        return "generate"
+
+    @staticmethod
+    def _extract_file_path(description: str) -> str:
+        """Extract a file path from a task description.
+
+        Looks for quoted paths first, then bare paths with extensions.
+        Returns empty string if no path found.
+        """
+        # Quoted path
+        quoted = re.search(r"['\"`]([^'\"`]+\.\w+)['\"`]", description)
+        if quoted:
+            return quoted.group(1)
+        # Bare path with extension
+        bare = re.search(r"(\S+\.\w{1,5})", description)
+        if bare:
+            return bare.group(1)
+        return ""
 
     def _no_tool_result(self, node: TaskNode, start: float) -> ExecutionResult:
         """Return error result for domains without tools."""

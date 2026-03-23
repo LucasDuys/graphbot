@@ -63,10 +63,13 @@ _TOOL_RISK: dict[str, RiskLevel] = {
     "web_fetch": RiskLevel.MEDIUM,
     "browser_extract_text": RiskLevel.MEDIUM,
     "browser_screenshot": RiskLevel.MEDIUM,
-    # Low risk: local reads, reasoning
+    # Medium risk: code editing modifies files
+    "code_edit": RiskLevel.MEDIUM,
+    # Low risk: local reads, reasoning, code generation (LLM-only)
     "file_read": RiskLevel.LOW,
     "file_list": RiskLevel.LOW,
     "file_search": RiskLevel.LOW,
+    "code_generate": RiskLevel.LOW,
     "llm_reason": RiskLevel.LOW,
 }
 

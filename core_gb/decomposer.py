@@ -65,9 +65,10 @@ _NODE_SCHEMA: dict[str, Any] = {
             "enum": [
                 "file_read", "file_list", "file_search",
                 "web_search", "web_fetch",
-                "shell_run", "llm_reason",
+                "shell_run", "code_generate", "code_edit",
+                "llm_reason",
             ],
-            "description": "Specific tool to use. Required for file/web/code domain nodes.",
+            "description": "Specific tool to use. Required for file/web/code domain nodes. Use code_generate for code generation (LLM-only), code_edit for modifying existing files.",
         },
         "tool_params": {
             "type": "object",

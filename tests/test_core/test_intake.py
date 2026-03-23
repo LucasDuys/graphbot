@@ -40,8 +40,10 @@ class TestDomainClassification:
 
     # CODE domain
     def test_code_function(self) -> None:
+        # Code generation goes to FILE (write) or SYSTEM (LLM), not CODE.
+        # CODE is reserved for shell commands and code-edit tasks.
         result = self.parser.parse("Write a Python function to sort a list")
-        assert result.domain == Domain.CODE
+        assert result.domain != Domain.CODE
 
     def test_code_debug(self) -> None:
         result = self.parser.parse("Debug this code and fix the bug")
@@ -103,7 +105,9 @@ class TestDomainClassification:
             ("Search for the latest news about AI", Domain.WEB),
             ("Fetch the URL http://example.com", Domain.WEB),
             ("What is the weather in London", Domain.WEB),
-            ("Write a Python function to sort a list", Domain.CODE),
+            # Code generation goes to FILE (via "write" keyword), not CODE.
+            # CODE is narrowed to shell commands and code-edit tasks.
+            ("Write a Python function to sort a list", Domain.FILE),
             ("Debug this code and fix the bug", Domain.CODE),
             ("Refactor the class to use composition", Domain.CODE),
             ("Send an email to John about the meeting", Domain.COMMS),
