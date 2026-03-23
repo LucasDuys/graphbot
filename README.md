@@ -195,7 +195,7 @@ We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ---
 
 <p align="center">
-  Built by <a href="https://github.com/LucasDuys">Lucas Duys</a> as a research project at TU/e.
+  Built by <a href="https://github.com/LucasDuys">Lucas Duys</a> -- independent research project.
   <br />
   If this is useful to you, a star helps others find it.
 </p>
