@@ -59,12 +59,17 @@ class VerificationConfig:
         layer3_opt_in: Whether Layer 3 is enabled at all. Even when
             complexity >= layer3_threshold, Layer 3 only runs if this
             is True. Default False.
+        skip_layer1_for_simple: Whether to skip Layer 1 verification for
+            complexity=1 tasks. These are trivially simple tasks where
+            format verification adds latency without meaningful benefit.
+            Default True.
     """
 
     layer1_enabled: bool = True
     layer2_threshold: int = 3
     layer3_threshold: int = 5
     layer3_opt_in: bool = False
+    skip_layer1_for_simple: bool = True
 
 
 # Refusal phrases that indicate the LLM declined to answer.

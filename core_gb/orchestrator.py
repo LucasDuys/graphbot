@@ -128,7 +128,7 @@ class Orchestrator:
         # Return canned response immediately, skip entire pipeline.
         # No LLM call, no pattern check, no entity resolution.
         # ------------------------------------------------------------------
-        if intake.is_trivial:
+        if intake.is_trivial is True:
             t0 = time.perf_counter()
             trivial_text = self._intake.trivial_response(intake)
             if trivial_text is not None:
