@@ -1,0 +1,135 @@
+{
+  "timestamp": "2026-03-24T16:12:54.517615",
+  "task_count": 30,
+  "configuration_count": 4,
+  "configurations": [
+    {
+      "id": "llama8b_direct",
+      "label": "Llama 8B Direct",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "mode": "direct"
+    },
+    {
+      "id": "llama8b_pipeline",
+      "label": "Llama 8B Pipeline",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "mode": "pipeline"
+    },
+    {
+      "id": "llama70b_direct",
+      "label": "Llama 70B Direct",
+      "model": "meta-llama/llama-3.3-70b-instruct",
+      "mode": "direct"
+    },
+    {
+      "id": "gpt4o_direct",
+      "label": "GPT-4o Direct",
+      "model": "openai/gpt-4o",
+      "mode": "direct"
+    }
+  ],
+  "results": [
+    {
+      "config_id": "llama8b_direct",
+      "config_label": "Llama 8B Direct",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "mode": "direct",
+      "task_id": "qa_01",
+      "task_category": "Simple Q&A",
+      "quality": 5,
+      "tokens": 166,
+      "cost": 0.0,
+      "latency_ms": 0.02,
+      "success": true,
+      "keyword_hits": 1,
+      "keyword_total": 1
+    },
+    {
+      "config_id": "llama8b_pipeline",
+      "config_label": "Llama 8B Pipeline",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "mode": "pipeline",
+      "task_id": "qa_01",
+      "task_category": "Simple Q&A",
+      "quality": 5,
+      "tokens": 166,
+      "cost": 0.0,
+      "latency_ms": 62.87,
+      "success": true,
+      "keyword_hits": 1,
+      "keyword_total": 1
+    },
+    {
+      "config_id": "llama70b_direct",
+      "config_label": "Llama 70B Direct",
+      "model": "meta-llama/llama-3.3-70b-instruct",
+      "mode": "direct",
+      "task_id": "qa_01",
+      "task_category": "Simple Q&A",
+      "quality": 5,
+      "tokens": 136,
+      "cost": 3.5e-05,
+      "latency_ms": 0.01,
+      "success": true,
+      "keyword_hits": 1,
+      "keyword_total": 1
+    },
+    {
+      "config_id": "gpt4o_direct",
+      "config_label": "GPT-4o Direct",
+      "model": "openai/gpt-4o",
+      "mode": "direct",
+      "task_id": "qa_01",
+      "task_category": "Simple Q&A",
+      "quality": 5,
+      "tokens": 116,
+      "cost": 0.00025,
+      "latency_ms": 0.01,
+      "success": true,
+      "keyword_hits": 1,
+      "keyword_total": 1
+    }
+  ],
+  "summaries": {
+    "llama8b_direct": {
+      "config_label": "Llama 8B Direct",
+      "avg_quality": 5.0,
+      "avg_tokens": 166.0,
+      "avg_cost": 0.0,
+      "avg_latency_ms": 0.0,
+      "total_tasks": 1,
+      "success_rate": 1.0,
+      "token_reduction_vs_gpt4o_pct": -43.1
+    },
+    "llama8b_pipeline": {
+      "config_label": "Llama 8B Pipeline",
+      "avg_quality": 5.0,
+      "avg_tokens": 166.0,
+      "avg_cost": 0.0,
+      "avg_latency_ms": 62.9,
+      "total_tasks": 1,
+      "success_rate": 1.0,
+      "token_reduction_vs_gpt4o_pct": -43.1
+    },
+    "llama70b_direct": {
+      "config_label": "Llama 70B Direct",
+      "avg_quality": 5.0,
+      "avg_tokens": 136.0,
+      "avg_cost": 3.5e-05,
+      "avg_latency_ms": 0.0,
+      "total_tasks": 1,
+      "success_rate": 1.0,
+      "token_reduction_vs_gpt4o_pct": -17.2
+    },
+    "gpt4o_direct": {
+      "config_label": "GPT-4o Direct",
+      "avg_quality": 5.0,
+      "avg_tokens": 116.0,
+      "avg_cost": 0.00025,
+      "avg_latency_ms": 0.0,
+      "total_tasks": 1,
+      "success_rate": 1.0,
+      "token_reduction_vs_gpt4o_pct": 0.0
+    }
+  }
+}
