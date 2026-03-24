@@ -666,19 +666,25 @@ async def run_evaluation(
     judge_model: str = DEFAULT_JUDGE_MODEL,
     dry_run: bool = False,
     seed: int | None = None,
+    input_path: str | None = None,
 ) -> None:
     """Run the full blind evaluation pipeline."""
     if seed is not None:
         random.seed(seed)
 
     # Load or generate task data
-    validation_path = Path(__file__).parent.parent / "benchmarks" / "thesis_validation.json"
+    default_path = Path(__file__).resolve().parent.parent / "benchmarks" / "thesis_validation.json"
+    validation_path: Path = Path(input_path) if input_path else default_path
 
     tasks: list[dict[str, Any]] = []
 
     if validation_path.exists():
         print(f"Loading tasks from {validation_path}")
         tasks = load_thesis_validation(validation_path)
+    elif input_path is not None:
+        # Explicit path was given but does not exist -- fail immediately
+        print(f"Error: specified input file not found: {validation_path}")
+        sys.exit(1)
 
     if not tasks and dry_run:
         print("Dry-run mode: generating fake task data")
@@ -742,6 +748,15 @@ def main() -> None:
         default=None,
         help="Random seed for reproducible blinding order",
     )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help=(
+            "Path to thesis_validation.json. If omitted, auto-detects "
+            "benchmarks/thesis_validation.json in the project root."
+        ),
+    )
     args = parser.parse_args()
 
     asyncio.run(
@@ -749,6 +764,7 @@ def main() -> None:
             judge_model=args.judge_model,
             dry_run=args.dry_run,
             seed=args.seed,
+            input_path=args.input,
         )
     )
 
