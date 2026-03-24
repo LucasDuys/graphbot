@@ -106,6 +106,12 @@ Get your free key at [openrouter.ai/keys](https://openrouter.ai/keys), then:
 ```bash
 python scripts/healthcheck.py               # Verify setup
 python scripts/run_capability_tests.py       # Run the 30-task benchmark
+python scripts/validate_thesis.py --dry-run  # Core thesis validation (4-tier comparison)
+python scripts/blind_eval.py --dry-run       # LLM-as-judge blind evaluation
+python scripts/stress_test.py --dry-run      # 10 hard tasks stress test
+python scripts/adversarial_test.py --dry-run # 14 adversarial attack vectors
+python scripts/demo_research_report.py --dry-run  # Research report demo
+python scripts/demo_flight_search.py --dry-run     # Flight search + WhatsApp demo
 ```
 
 ### WhatsApp Bot (daily use)
@@ -164,7 +170,7 @@ channels/         -- WhatsApp (Baileys), Telegram
 ui/frontend/      -- Dashboard: Next.js, React Flow DAG visualization, D3 knowledge graph
 scripts/          -- Benchmarks, healthcheck, maintenance, goal evaluation
 docs/research/    -- 190+ papers analyzed across 15 research documents (2023-2026)
-tests/            -- 1500+ tests
+tests/            -- 1700+ tests (unit, integration, regression, demos, benchmarks)
 ```
 
 ## Research
@@ -177,6 +183,24 @@ This project is backed by exhaustive research -- 190+ papers from NeurIPS, ICLR,
 - **Cost stacking compounds** -- FrugalGPT + RouteLLM + caching achieves 2-8% of naive cost
 
 Full research library: [`docs/research/`](docs/research/)
+
+## Validation
+
+GraphBot includes a complete validation toolkit to prove the core thesis:
+
+- **4-tier model comparison** (`scripts/validate_thesis.py`) -- Same 30 tasks on Llama 8B direct, 8B+GraphBot, 70B direct, GPT-4o direct
+- **Blind LLM-as-judge** (`scripts/blind_eval.py`) -- Pairwise comparison where a judge model picks the better output without knowing which config produced it
+- **Stress test** (`scripts/stress_test.py`) -- 10 genuinely hard tasks (multi-hop reasoning, ambiguous instructions, 3+ tool chains)
+- **Adversarial test** (`scripts/adversarial_test.py`) -- 14 attack vectors (prompt injection, jailbreaks, data exfiltration, encoded payloads)
+- **Permanent regression suite** (`tests/test_regression/`) -- All of the above packaged as pytest with mocked providers
+
+Run the full validation:
+```bash
+python scripts/run_full_validation.py --dry-run  # Thesis validation + blind eval
+python -m pytest tests/test_regression/ -v        # Regression suite (no API calls)
+```
+
+See [`docs/VALIDATION_GUIDE.md`](docs/VALIDATION_GUIDE.md) for detailed instructions.
 
 ## Tech Stack
 
