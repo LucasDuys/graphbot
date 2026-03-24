@@ -45,23 +45,49 @@ We ran 30 diverse tasks (Q&A, code generation, web search, file operations, tran
 
 All traces verified on [LangSmith](https://eu.api.smith.langchain.com). Harmful requests (rm -rf, spam, malware) blocked in **0.0 seconds** with zero LLM calls.
 
-## Core Thesis Validated: 8B Matches GPT-4o at 2% of the Cost
+## Core Thesis: Does GraphBot Actually Help?
 
-We ran the same 30 tasks across 4 model configurations with real API calls:
+We tested 15 tasks across 3 difficulty levels on 3 configurations with real API calls. Quality scored by GPT-4o-mini as an impartial judge (1-5 scale).
 
-| Configuration | Quality (1-5) | Avg Tokens | Avg Cost/Task | Avg Latency | Success | Cost vs GPT-4o |
-|--------------|--------------|------------|---------------|-------------|---------|----------------|
-| Llama 8B (direct, no GraphBot) | 4.87 | 212 | $0.000010 | 3.7s | 100% | 0.6% |
-| **Llama 8B + GraphBot pipeline** | **4.87** | **957** | **$0.000034** | **10.7s** | **93%** | **2.1%** |
-| Llama 70B (direct, no GraphBot) | 4.90 | 259 | $0.000090 | 10.2s | 100% | 5.6% |
-| GPT-4o (direct, no GraphBot) | 4.83 | 184 | $0.001613 | 3.1s | 100% | 100% |
+### Easy Tasks (trivial Q&A -- any model handles these)
 
-**Key findings:**
-- **Llama 8B + GraphBot matches GPT-4o quality** (4.87 vs 4.83) at **2.1% of the cost**
-- The free 8B model through GraphBot scores **higher** than GPT-4o (4.87 > 4.83) because decomposition + graph context produces more thorough answers
-- GraphBot uses more tokens (957 vs 184) but on a free model -- so total cost is $0.000034 vs $0.001613
-- The 93% success rate on the pipeline is because safety tasks are intentionally blocked (2 of 30), not failures
-- **You save 97.9% on cost by using GraphBot with a free model instead of GPT-4o directly**
+| Configuration | Quality | Avg Cost | Avg Latency |
+|--------------|---------|----------|-------------|
+| Llama 8B direct | 4.80 | $0.000002 | 1.3s |
+| **Llama 8B + GraphBot** | **5.00** | **$0.000005** | **2.0s** |
+| GPT-4o direct | 4.80 | $0.000220 | 0.9s |
+
+GraphBot scores slightly higher but adds latency. On easy tasks, it's not worth the overhead.
+
+### Hard Tasks (multi-step reasoning, structured comparisons -- where 8B struggles)
+
+| Configuration | Quality | Avg Cost | Avg Latency |
+|--------------|---------|----------|-------------|
+| Llama 8B direct | 4.00 | $0.000056 | 16.9s |
+| **Llama 8B + GraphBot** | **4.20** | **$0.000947** | **46.4s** |
+| GPT-4o direct | 4.40 | $0.006795 | 8.2s |
+
+**GraphBot improves 8B quality by +0.20** on hard tasks (4.00 -> 4.20), closing the gap with GPT-4o (4.40) at **13.9% of GPT-4o's cost.** The decomposition pipeline produces more structured, thorough answers on complex multi-part questions.
+
+### Tool-Dependent Tasks (require file/shell/web access -- impossible without tools)
+
+| Configuration | Quality | Avg Cost | Avg Latency |
+|--------------|---------|----------|-------------|
+| Llama 8B direct | 3.20 | $0.000010 | 3.3s |
+| **Llama 8B + GraphBot** | **3.40** | **$0.000067** | **10.6s** |
+| GPT-4o direct | 3.40 | $0.001232 | 1.7s |
+
+GraphBot matches GPT-4o quality on tool tasks at **5.4% of the cost** -- and unlike GPT-4o, it can actually execute the tools (file reads, shell commands, web searches) rather than just guessing.
+
+### Overall (all 15 tasks)
+
+| Configuration | Quality | Total Cost | Avg Latency |
+|--------------|---------|------------|-------------|
+| Llama 8B direct | 4.00 | $0.000339 | 7.2s |
+| **Llama 8B + GraphBot** | **4.20** | **$0.005099** | **19.7s** |
+| GPT-4o direct | 4.20 | $0.041237 | 3.6s |
+
+**Bottom line:** GraphBot brings a free 8B model to GPT-4o quality (both 4.20/5) at **12.4% of the cost.** The improvement is real but modest on current tasks -- the biggest gains are on hard multi-step problems and tool-dependent tasks where decomposition and tool access matter most.
 
 ## How It Works
 
