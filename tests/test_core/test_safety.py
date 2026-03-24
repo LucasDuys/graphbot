@@ -479,7 +479,7 @@ class TestOrchestratorSafetyIntegration:
 
         provider = MockProvider()
         router = ModelRouter(provider=provider)
-        orch = Orchestrator(store, router)
+        orch = Orchestrator(store, router, force_decompose=True)
 
         result = await orch.process(
             "Compare the weather in Amsterdam and London and Berlin"

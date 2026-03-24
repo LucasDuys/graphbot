@@ -186,7 +186,7 @@ class TestOrchestratorPassesTemplate:
         mock_store.get_context.return_value = None
         mock_router = MagicMock()
 
-        orchestrator = Orchestrator(store=mock_store, router=mock_router)
+        orchestrator = Orchestrator(store=mock_store, router=mock_router, force_decompose=True)
 
         # Set up decomposer to return nodes with a template
         test_template = {

@@ -225,7 +225,7 @@ class TestNoPatternFallsThrough:
         ]
         provider = SequentialMockProvider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         # Patch load_all to return empty list (no patterns)
         with patch.object(
@@ -287,7 +287,7 @@ class TestPatternExtractedAfterComplexTask:
         ]
         provider = SequentialMockProvider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         # Patch load_all to return empty (no patterns)
         with patch.object(

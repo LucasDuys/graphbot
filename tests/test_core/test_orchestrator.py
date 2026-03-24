@@ -183,7 +183,7 @@ class TestComplexTaskDecomposition:
         ]
         provider = SequentialMockProvider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         result = await orchestrator.process(
             "Compare the weather in Amsterdam, London, and Berlin"
@@ -268,7 +268,7 @@ class TestSequentialExecutionOrder:
         ]
         provider = SequentialMockProvider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         result = await orchestrator.process(
             "Do step A then step B then step C and summarize"
@@ -360,7 +360,7 @@ class TestAggregatedResult:
         ]
         provider = SequentialMockProvider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         result = await orchestrator.process(
             "Compare two things and also analyze them together"
@@ -434,7 +434,7 @@ class TestDataForwarding:
         ]
         provider = SequentialMockProvider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         result = await orchestrator.process(
             "Get weather for Amsterdam and then summarize it"
@@ -469,7 +469,7 @@ class TestDecomposerFallback:
         ]
         provider = SequentialMockProvider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         result = await orchestrator.process(
             "Compare the weather in Amsterdam, London, and Berlin"
@@ -477,6 +477,159 @@ class TestDecomposerFallback:
 
         assert result.success is True
         assert "42" in result.output
+
+        store.close()
+
+
+class TestSmartRouting:
+    """Smart routing: single-call by default, decomposition for complex/tool tasks."""
+
+    async def test_single_call_for_simple_system_query(self) -> None:
+        """Low-complexity SYSTEM domain routes to single-call (1 LLM call)."""
+        store = _make_store()
+        provider = SequentialMockProvider([_simple_completion("42")])
+        router = ModelRouter(provider=provider)
+        orchestrator = Orchestrator(store, router)
+
+        # "Explain how gravity works" -> SYSTEM domain, complexity=1
+        result = await orchestrator.process("Explain how gravity works")
+
+        assert result.success is True
+        assert result.output == "42"
+        # Single-call path: exactly 1 LLM call
+        assert len(provider.call_log) == 1
+        store.close()
+
+    async def test_single_call_for_synthesis_query(self) -> None:
+        """SYNTHESIS domain with moderate complexity routes to single-call."""
+        store = _make_store()
+        provider = SequentialMockProvider([_simple_completion("Analysis complete")])
+        router = ModelRouter(provider=provider)
+        orchestrator = Orchestrator(store, router)
+
+        result = await orchestrator.process("Compare Python and JavaScript")
+
+        assert result.success is True
+        assert result.output == "Analysis complete"
+        assert len(provider.call_log) == 1
+        store.close()
+
+    async def test_decomposition_for_high_complexity(self) -> None:
+        """Complexity >= 4 triggers decomposition even for non-tool domains."""
+        store = _make_store()
+        # The message has enough conjunctions/commas/questions to push complexity >= 4
+        # "and" + "then" + "also" + commas -> complexity 5
+        responses = [
+            _simple_completion("garbage", tokens=5, cost=0.001),
+            _simple_completion("more garbage", tokens=5, cost=0.001),
+            _simple_completion("Fallback answer", tokens=10, cost=0.001),
+        ]
+        provider = SequentialMockProvider(responses)
+        router = ModelRouter(provider=provider)
+        orchestrator = Orchestrator(store, router)
+
+        result = await orchestrator.process(
+            "Explain quantum physics, and then compare it with relativity, "
+            "and also discuss string theory, plus summarize the key differences?"
+        )
+
+        assert result.success is True
+        # Should have gone through decomposition (multiple calls)
+        assert len(provider.call_log) >= 2
+        store.close()
+
+    async def test_decomposition_for_file_domain(self) -> None:
+        """FILE domain triggers decomposition regardless of complexity."""
+        store = _make_store()
+        responses = [
+            _simple_completion("garbage", tokens=5, cost=0.001),
+            _simple_completion("more garbage", tokens=5, cost=0.001),
+            _simple_completion("File contents here", tokens=10, cost=0.001),
+        ]
+        provider = SequentialMockProvider(responses)
+        router = ModelRouter(provider=provider)
+        orchestrator = Orchestrator(store, router)
+
+        result = await orchestrator.process("Read the readme.md file")
+
+        assert result.success is True
+        # FILE domain -> decomposition -> multiple LLM calls
+        assert len(provider.call_log) >= 2
+        store.close()
+
+    async def test_decomposition_for_web_domain(self) -> None:
+        """WEB domain triggers decomposition regardless of complexity."""
+        store = _make_store()
+        responses = [
+            _simple_completion("garbage", tokens=5, cost=0.001),
+            _simple_completion("more garbage", tokens=5, cost=0.001),
+            _simple_completion("Search results", tokens=10, cost=0.001),
+        ]
+        provider = SequentialMockProvider(responses)
+        router = ModelRouter(provider=provider)
+        orchestrator = Orchestrator(store, router)
+
+        result = await orchestrator.process("Search the web for Python tutorials")
+
+        assert result.success is True
+        assert len(provider.call_log) >= 2
+        store.close()
+
+    async def test_force_decompose_overrides_single_call(self) -> None:
+        """force_decompose=True forces decomposition even for simple queries."""
+        store = _make_store()
+        responses = [
+            _simple_completion("garbage", tokens=5, cost=0.001),
+            _simple_completion("more garbage", tokens=5, cost=0.001),
+            _simple_completion("Forced decomp answer", tokens=10, cost=0.001),
+        ]
+        provider = SequentialMockProvider(responses)
+        router = ModelRouter(provider=provider)
+        orchestrator = Orchestrator(store, router, force_decompose=True)
+
+        result = await orchestrator.process("What is 2+2?")
+
+        assert result.success is True
+        # force_decompose -> decomposition -> multiple calls (decompose + fallback)
+        assert len(provider.call_log) >= 2
+        store.close()
+
+    async def test_should_decompose_returns_reason(self) -> None:
+        """_should_decompose returns a descriptive reason string."""
+        store = _make_store()
+        provider = SequentialMockProvider([_simple_completion("x")])
+        router = ModelRouter(provider=provider)
+
+        # Test force_decompose reason
+        orch = Orchestrator(store, router, force_decompose=True)
+        from core_gb.intake import IntakeParser
+        intake = IntakeParser().parse("hello world")
+        should, reason = orch._should_decompose(intake)
+        assert should is True
+        assert "force_decompose" in reason
+
+        # Test complexity reason
+        orch2 = Orchestrator(store, router)
+        intake_complex = IntakeParser().parse(
+            "Do A, and then B, and also C, plus D, and finally E?"
+        )
+        if intake_complex.complexity >= 4:
+            should2, reason2 = orch2._should_decompose(intake_complex)
+            assert should2 is True
+            assert "complexity" in reason2
+
+        # Test tool domain reason
+        intake_file = IntakeParser().parse("Read the readme.md file")
+        if intake_file.domain == Domain.FILE:
+            should3, reason3 = orch2._should_decompose(intake_file)
+            assert should3 is True
+            assert "domain" in reason3
+
+        # Test single-call (no decompose needed)
+        intake_simple = IntakeParser().parse("What is the meaning of life?")
+        should4, reason4 = orch2._should_decompose(intake_simple)
+        assert should4 is False
+        assert reason4 == ""
 
         store.close()
 

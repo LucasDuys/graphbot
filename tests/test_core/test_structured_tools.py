@@ -158,7 +158,12 @@ class TestTaskTypeClassification:
 
 
 class TestIntegratedSkipsDecomposition:
-    """T089: INTEGRATED tasks should go directly to executor, not decomposer."""
+    """T089: INTEGRATED tasks should go directly to single-call executor, not decomposer.
+
+    With smart routing (T210), comparison queries route to SingleCallExecutor
+    instead of the old INTEGRATED path through SimpleExecutor. The key
+    invariant remains: decomposer is never called for these tasks.
+    """
 
     @pytest.mark.asyncio
     async def test_integrated_skips_decomposition(self) -> None:
@@ -177,16 +182,21 @@ class TestIntegratedSkipsDecomposition:
             total_nodes=1,
             total_tokens=100,
         )
-        orch._executor = MagicMock()
-        orch._executor.execute = AsyncMock(return_value=fake_result)
+        # Mock the single-call executor (smart routing default path)
+        orch._single_executor = MagicMock()
+        orch._single_executor.execute = AsyncMock(return_value=fake_result)
         orch._decomposer = MagicMock()
         orch._decomposer.decompose = AsyncMock()
         orch._graph_updater = MagicMock()
         orch._pattern_store = MagicMock()
         orch._pattern_store.load_all.return_value = []
+        # Mock context enricher to return empty context
+        orch._context_enricher = MagicMock()
+        from core_gb.context_enrichment import EnrichedContext
+        orch._context_enricher.enrich.return_value = EnrichedContext()
 
         result = await orch.process("Compare Python versus JavaScript")
 
-        orch._executor.execute.assert_called_once()
+        orch._single_executor.execute.assert_called_once()
         orch._decomposer.decompose.assert_not_called()
         assert result.success is True

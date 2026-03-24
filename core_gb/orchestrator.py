@@ -8,16 +8,18 @@ import time
 import uuid
 from pathlib import Path
 
+from core_gb.context_enrichment import ContextEnricher, EnrichedContext
 from core_gb.conversation import ConversationMemory
 from core_gb.dag_executor import DAGExecutor
 from core_gb.decomposer import Decomposer
 from core_gb.executor import SimpleExecutor
-from core_gb.intake import IntakeParser, TaskType
+from core_gb.intake import IntakeParser, IntakeResult, TaskType
 from core_gb.patterns import PatternMatcher, PatternStore
 from core_gb.constitution import ConstitutionalChecker
 from core_gb.safety import IntentClassifier
+from core_gb.single_executor import SingleCallExecutor
 from core_gb.tool_factory import ToolFactory
-from core_gb.types import Domain, ExecutionResult, Pattern, TaskNode, TaskStatus
+from core_gb.types import Domain, ExecutionResult, GraphContext, Pattern, TaskNode, TaskStatus
 from core_gb.verification import VerificationConfig
 from core_gb.wave_event import WaveCompleteEvent
 from graph.resolver import EntityResolver
@@ -37,17 +39,27 @@ class Orchestrator:
     Pattern matching provides a cache layer before decomposition.
     """
 
+    # Domains that require tool access and therefore need decomposition.
+    _TOOL_DOMAINS: frozenset[Domain] = frozenset({
+        Domain.FILE,
+        Domain.WEB,
+        Domain.CODE,
+        Domain.BROWSER,
+    })
+
     def __init__(
         self,
         store: GraphStore,
         router: ModelRouter,
         verification_config: VerificationConfig | None = None,
         enable_replan: bool = False,
+        force_decompose: bool = False,
     ) -> None:
         self._store = store
         self._router = router
         self._verification_config = verification_config or VerificationConfig()
         self._enable_replan = enable_replan
+        self._force_decompose = force_decompose
         self._intake = IntakeParser()
         self._tool_registry = ToolRegistry(workspace=str(Path.cwd()), router=router)
         self._tool_factory = ToolFactory(router=router, store=store)
@@ -73,6 +85,8 @@ class Orchestrator:
         self._intent_classifier = IntentClassifier()
         self._constitutional_checker = ConstitutionalChecker()
         self._conversation_memory = ConversationMemory(store)
+        self._context_enricher = ContextEnricher(store)
+        self._single_executor = SingleCallExecutor(router)
 
         if self._enable_replan:
             self._dag_executor.set_replan_callback(self._replan_callback)
@@ -214,48 +228,53 @@ class Orchestrator:
                         return result
 
         # ------------------------------------------------------------------
-        # Stage 3: Simple task -- skip entity resolution for complexity=1
+        # Stage 3: Smart routing -- single-call vs decomposition
         # ------------------------------------------------------------------
-        if intake.is_simple:
+        should_decompose, decompose_reason = self._should_decompose(intake)
+
+        if not should_decompose:
+            # Single-call path: enrich context from knowledge graph, then
+            # make exactly one LLM call via SingleCallExecutor.
+            logger.info(
+                "Routing to single-call (complexity=%d, domain=%s)",
+                intake.complexity,
+                intake.domain.value,
+            )
+            t0 = time.perf_counter()
+            enriched = self._context_enricher.enrich(
+                message, chat_id=chat_id,
+            )
+            self._log_stage_latency("context_enrich", t0)
+
+            graph_ctx = self._enriched_to_graph_context(enriched)
+
+            t0 = time.perf_counter()
+            result = await self._single_executor.execute(
+                task=message,
+                graph_context=graph_ctx,
+                conversation_history=conversation_history or None,
+                pattern_hints=list(enriched.patterns) or None,
+                complexity=intake.complexity,
+            )
+            self._log_stage_latency("single_call_execute", t0)
+
             node = TaskNode(
-                id=str(uuid.uuid4()),
+                id=result.root_id,
                 description=message,
                 is_atomic=True,
-                domain=Domain.SYNTHESIS,
+                domain=intake.domain,
                 complexity=intake.complexity,
                 status=TaskStatus.READY,
             )
-            t0 = time.perf_counter()
-            result = await self._executor.execute(
-                message, intake.complexity,
-                conversation_history=conversation_history or None,
-            )
-            self._log_stage_latency("simple_execute", t0)
             self._graph_updater.update(message, [node], result)
-            self._log_pipeline_total(pipeline_start, "simple")
+            self._log_pipeline_total(pipeline_start, "single_call")
             self._store_assistant_response(chat_id, result)
             return result
 
-        # INTEGRATED tasks: single LLM call with full context, skip decomposition
-        if intake.task_type == TaskType.INTEGRATED:
-            t0 = time.perf_counter()
-            result = await self._executor.execute(
-                message, max(intake.complexity, 3),
-                conversation_history=conversation_history or None,
-            )
-            self._log_stage_latency("integrated_execute", t0)
-            node = TaskNode(
-                id=str(uuid.uuid4()),
-                description=message,
-                is_atomic=True,
-                domain=Domain.SYNTHESIS,
-                complexity=max(intake.complexity, 3),
-                status=TaskStatus.READY,
-            )
-            self._graph_updater.update(message, [node], result)
-            self._log_pipeline_total(pipeline_start, "integrated")
-            self._store_assistant_response(chat_id, result)
-            return result
+        # Decomposition path: task is complex enough or requires tools.
+        logger.info(
+            "Routing to decomposition (reason: %s)", decompose_reason,
+        )
 
         # ------------------------------------------------------------------
         # Stage 4: Complex path -- resolve entities, get context, decompose
@@ -351,6 +370,37 @@ class Orchestrator:
         """
         if chat_id is not None and result.output:
             self._conversation_memory.add_message(chat_id, "assistant", result.output)
+
+    def _should_decompose(self, intake: IntakeResult) -> tuple[bool, str]:
+        """Decide whether a task requires decomposition or can use single-call.
+
+        Returns:
+            A (should_decompose, reason) tuple. If should_decompose is False,
+            reason is empty. If True, reason describes why decomposition was
+            chosen.
+        """
+        if self._force_decompose:
+            return True, "force_decompose=True"
+
+        if intake.complexity >= 4:
+            return True, f"complexity={intake.complexity} >= 4"
+
+        if intake.domain in self._TOOL_DOMAINS:
+            return True, f"domain={intake.domain.value} requires tools"
+
+        return False, ""
+
+    @staticmethod
+    def _enriched_to_graph_context(enriched: EnrichedContext) -> GraphContext:
+        """Convert an EnrichedContext to a GraphContext for SingleCallExecutor."""
+        return GraphContext(
+            relevant_entities=enriched.entities,
+            active_memories=enriched.memories,
+            matching_patterns=enriched.patterns,
+            reflections=enriched.reflections,
+            total_tokens=enriched.total_tokens,
+            token_count=enriched.total_tokens,
+        )
 
     @staticmethod
     def _blocked_result(message: str, reason: str) -> ExecutionResult:
