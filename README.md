@@ -160,7 +160,7 @@ core_gb/          -- Pipeline: orchestrator, decomposer, DAG executor, verificat
 graph/            -- Knowledge graph: Kuzu store, PPR retrieval, activation, consolidation, forgetting
 models/           -- LLM routing: multi-provider rotation, cascade, rate limiting, circuit breaking
 tools_gb/         -- Tools: file, web, shell, browser (Playwright), dynamic tool factory
-nanobot/channels/ -- Channels: WhatsApp (Baileys), Telegram
+channels/         -- WhatsApp (Baileys), Telegram
 ui/frontend/      -- Dashboard: Next.js, React Flow DAG visualization, D3 knowledge graph
 scripts/          -- Benchmarks, healthcheck, maintenance, goal evaluation
 docs/research/    -- 190+ papers analyzed across 15 research documents (2023-2026)

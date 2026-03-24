@@ -27,8 +27,8 @@ export class BridgeServer {
   async start(): Promise<void> {
     // Bind to localhost only — never expose to external network
     this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port });
-    console.log(`🌉 Bridge server listening on ws://127.0.0.1:${this.port}`);
-    if (this.token) console.log('🔒 Token authentication enabled');
+    console.log(`Bridge server listening on ws://127.0.0.1:${this.port}`);
+    if (this.token) console.log('Token authentication enabled');
 
     // Initialize WhatsApp client
     this.wa = new WhatsAppClient({
@@ -48,7 +48,7 @@ export class BridgeServer {
           try {
             const msg = JSON.parse(data.toString());
             if (msg.type === 'auth' && msg.token === this.token) {
-              console.log('🔗 Python client authenticated');
+              console.log('Python client authenticated');
               this.setupClient(ws);
             } else {
               ws.close(4003, 'Invalid token');
@@ -58,7 +58,7 @@ export class BridgeServer {
           }
         });
       } else {
-        console.log('🔗 Python client connected');
+        console.log('Python client connected');
         this.setupClient(ws);
       }
     });
@@ -82,7 +82,7 @@ export class BridgeServer {
     });
 
     ws.on('close', () => {
-      console.log('🔌 Python client disconnected');
+      console.log('Python client disconnected');
       this.clients.delete(ws);
     });
 

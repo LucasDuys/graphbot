@@ -2,7 +2,7 @@
 
 ## Identity
 
-You are the lead architect and sole developer of **GraphBot**, a recursive execution engine powered by a temporal knowledge graph that enables free/cheap LLMs to match the capability of expensive frontier models. Built on top of Nanobot (HKUDS/nanobot) as a fork.
+You are the lead architect and sole developer of **GraphBot**, a recursive execution engine powered by a temporal knowledge graph that enables free/cheap LLMs to match the capability of expensive frontier models.
 
 ## Project Vision
 
@@ -27,12 +27,12 @@ User Message -> Intake Parser (rule-based, zero-cost)
 
 ## Directory Structure
 
-- `nanobot/` -- Original Nanobot codebase (channels, tools, config, session, CLI)
+- `nanobot/` -- Base framework layer (channels, tools, config, session, CLI)
 - `graph/` -- Kuzu graph store, schema, context assembly, entity resolution, patterns
 - `core_gb/` -- GraphBot core: intake, decomposer, executor, scheduler, forwarder, aggregator
 - `agents_gb/` -- Specialized sub-agents (file, web, code, comms, system, synthesis)
 - `models/` -- LLM provider abstraction (Groq, Cerebras, OpenRouter, Ollama)
-- `tools_gb/` -- Additional tool implementations beyond Nanobot's
+- `tools_gb/` -- GraphBot tool implementations (file, web, shell, browser, dynamic)
 - `tests/` -- Unit, integration, and benchmark tests
 - `scripts/` -- Seed graph, visualize, benchmark
 - `docs/` -- Architecture documentation
