@@ -188,7 +188,9 @@ class TestComplexTask1PlusNCalls:
 
         provider = tracker.make_provider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        # force_decompose=True ensures the task goes through decomposition
+        # even though smart routing would classify it as single-call eligible.
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         result = await orchestrator.process(
             "Compare thing A, thing B, and thing C in detail"
@@ -197,16 +199,17 @@ class TestComplexTask1PlusNCalls:
         assert isinstance(result, ExecutionResult)
         assert result.success is True
 
-        # 1 decomposition + 3 leaf executions = 4 total LLM calls
-        # Aggregation is deterministic (template_fill), so 0 additional calls
-        assert tracker.call_count == 4, (
-            f"Expected 4 LLM calls (1 decompose + 3 leaves), got {tracker.call_count}"
+        # 1 decomposition + 3 leaf executions + 1 synthesis aggregation = 5
+        # total LLM calls. The synthesis aggregation uses an LLM call when
+        # original_question is set (introduced by LLM synthesis aggregation).
+        assert tracker.call_count == 5, (
+            f"Expected 5 LLM calls (1 decompose + 3 leaves + 1 synthesis), "
+            f"got {tracker.call_count}"
         )
 
         # Verify call 1 was decomposition (complexity 3 -> larger model)
         assert tracker.calls[0]["model"] != tracker.calls[1]["model"] or True
-        # Verify no 5th call was made (aggregation is zero-LLM)
-        assert len(tracker.calls) == 4
+        assert len(tracker.calls) == 5
 
         store.close()
 
@@ -227,7 +230,9 @@ class TestAggregatedOutputHasTemplate:
 
         provider = tracker.make_provider(responses)
         router = ModelRouter(provider=provider)
-        orchestrator = Orchestrator(store, router)
+        # force_decompose=True ensures the task goes through decomposition
+        # even though smart routing would classify it as single-call eligible.
+        orchestrator = Orchestrator(store, router, force_decompose=True)
 
         result = await orchestrator.process(
             "Compare thing A, thing B, and thing C in detail"

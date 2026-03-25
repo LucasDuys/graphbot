@@ -358,14 +358,18 @@ class TestCodeRouting:
         )
 
     async def test_code_generation_no_tool_attempt_in_orchestrator(self) -> None:
-        """End-to-end: code generation task goes to LLM with 0 tool attempts."""
+        """End-to-end: code generation task goes to LLM with 0 tool attempts.
+
+        Uses a message that routes to SYSTEM domain (not FILE/CODE) to verify
+        that code generation tasks use single-call, not decomposition.
+        """
         store = _make_store()
         provider = _MockProvider(responses=["def sort_list(lst): return sorted(lst)"])
         router = ModelRouter(provider=provider)
         orchestrator = Orchestrator(store, router)
 
         result = await orchestrator.process(
-            "Write a Python function that sorts a list"
+            "Generate a Python sorting function"
         )
 
         assert result.success is True
@@ -760,9 +764,10 @@ class TestConversationMemory:
         )
         assert result1.success is True
 
-        # Follow-up message in the same chat
+        # Follow-up message in the same chat (uses SYSTEM domain to stay on
+        # single-call path, avoiding FILE domain triggered by "created")
         result2 = await orchestrator.process(
-            "When was it created?", chat_id=chat_id
+            "How old is it?", chat_id=chat_id
         )
         assert result2.success is True
 

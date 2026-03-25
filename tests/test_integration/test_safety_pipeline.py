@@ -240,7 +240,9 @@ class TestBenignComplexDecompositionPasses:
         ]
         provider = MockProvider(responses)
         router = ModelRouter(provider=provider)
-        orch = Orchestrator(store, router)
+        # force_decompose=True ensures decomposition path is taken -- smart
+        # routing would otherwise classify this as single-call eligible.
+        orch = Orchestrator(store, router, force_decompose=True)
 
         result = await orch.process(
             "Compare the weather in Amsterdam and London and Berlin"
