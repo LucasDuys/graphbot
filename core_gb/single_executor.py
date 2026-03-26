@@ -11,6 +11,7 @@ import logging
 import time
 import uuid
 
+from core_gb.prompt_templates import build_structured_system_prompt
 from core_gb.types import (
     CompletionResult,
     Domain,
@@ -57,6 +58,7 @@ class SingleCallExecutor:
         conversation_history: list[dict[str, str]] | None = None,
         pattern_hints: list[Pattern] | None = None,
         complexity: int = 1,
+        domain: Domain = Domain.SYNTHESIS,
     ) -> ExecutionResult:
         """Execute a single enriched LLM call.
 
@@ -81,13 +83,15 @@ class SingleCallExecutor:
             graph_context=graph_context,
             conversation_history=conversation_history,
             pattern_hints=pattern_hints,
+            domain=domain,
+            complexity=complexity,
         )
 
         task_node = TaskNode(
             id=root_id,
             description=task,
             is_atomic=True,
-            domain=Domain.SYNTHESIS,
+            domain=domain,
             complexity=complexity,
             status=TaskStatus.READY,
         )
@@ -142,31 +146,35 @@ class SingleCallExecutor:
         graph_context: GraphContext,
         conversation_history: list[dict[str, str]] | None = None,
         pattern_hints: list[Pattern] | None = None,
+        domain: Domain = Domain.SYNTHESIS,
+        complexity: int = 1,
     ) -> list[dict[str, str]]:
-        """Assemble the structured prompt sections into a message list.
+        """Assemble XML-structured prompt sections into a message list.
+
+        Uses domain-specific prompt templates with XML sections:
+        <context>, <instructions>, <examples>, <output_format>.
 
         Message structure:
-        1. System message with context, pattern hints
+        1. System message with role, XML-structured context and instructions
         2. Conversation history (last N messages)
         3. User message with the actual task
         """
-        system_parts: list[str] = ["You are a helpful assistant."]
-
-        # Context section: graph entities, relationships, memories
+        # Build context and pattern hint strings
         context_str = graph_context.format()
-        if context_str:
-            system_parts.append(
-                f"\n<context>\n{context_str}\n</context>"
-            )
-
-        # Pattern hints section
+        pattern_hints_text = ""
         if pattern_hints:
-            hints = self._format_pattern_hints(pattern_hints)
-            if hints:
-                system_parts.append(f"\n{hints}")
+            pattern_hints_text = self._format_pattern_hints(pattern_hints)
+
+        # Build the full structured system prompt
+        system_content = build_structured_system_prompt(
+            domain=domain,
+            complexity=complexity,
+            context_text=context_str,
+            pattern_hints_text=pattern_hints_text,
+        )
 
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": "".join(system_parts)},
+            {"role": "system", "content": system_content},
         ]
 
         # Conversation section: last N messages

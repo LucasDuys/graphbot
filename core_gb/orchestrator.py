@@ -255,6 +255,7 @@ class Orchestrator:
                 conversation_history=conversation_history or None,
                 pattern_hints=list(enriched.patterns) or None,
                 complexity=intake.complexity,
+                domain=intake.domain,
             )
             self._log_stage_latency("single_call_execute", t0)
 

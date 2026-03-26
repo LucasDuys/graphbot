@@ -132,7 +132,11 @@ class TestPromptAssembly:
 
         messages = provider.captured_messages[0]
         assert messages[0]["role"] == "system"
-        assert "You are a helpful assistant." in messages[0]["content"]
+        # XML-structured prompt: contains domain role and instruction sections
+        system_content = messages[0]["content"]
+        assert "<instructions>" in system_content
+        assert "<examples>" in system_content
+        assert "<output_format>" in system_content
 
     async def test_user_message_is_last(self) -> None:
         provider = MockProvider()
@@ -402,10 +406,11 @@ class TestFullPromptIntegration:
 
         messages = provider.captured_messages[0]
 
-        # System message: assistant role + context + pattern hints
+        # System message: domain role + XML-structured context + pattern hints
         system = messages[0]
         assert system["role"] == "system"
-        assert "You are a helpful assistant." in system["content"]
+        assert "<instructions>" in system["content"]
+        assert "<context>" in system["content"]
         assert "Test user" in system["content"]
         assert "GraphBot" in system["content"]
         assert "uses Python 3.12" in system["content"]

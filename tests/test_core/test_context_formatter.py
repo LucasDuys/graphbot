@@ -34,10 +34,7 @@ class TestSectionFormatting:
         formatter = ContextFormatter()
         sections = formatter._format_sections(ctx)
         assert "entities" in sections
-        assert sections["entities"].startswith(
-            "Here is relevant background information:"
-        )
-        assert "- User: Alice -- developer at TU/e" in sections["entities"]
+        assert "User: Alice -- developer at TU/e" in sections["entities"]
 
     def test_memories_section(self) -> None:
         ctx = EnrichedContext(
@@ -47,9 +44,8 @@ class TestSectionFormatting:
         formatter = ContextFormatter()
         sections = formatter._format_sections(ctx)
         assert "memories" in sections
-        assert sections["memories"].startswith("Relevant memories:")
-        assert "- User prefers Python" in sections["memories"]
-        assert "- Last session discussed graphs" in sections["memories"]
+        assert "User prefers Python" in sections["memories"]
+        assert "Last session discussed graphs" in sections["memories"]
 
     def test_reflections_section(self) -> None:
         ctx = EnrichedContext(
@@ -191,7 +187,9 @@ class TestTokenBudgetIntegration:
         formatter = ContextFormatter(token_budget=budget)
         messages = formatter.format(ctx, task="test")
         system_content = messages[0]["content"]
-        assert "Here is relevant background information:" in system_content
+        # Entity content should be in the context section
+        assert "Alice" in system_content
+        assert "<context>" in system_content
 
 
 class TestMessageAssembly:
@@ -263,12 +261,23 @@ class TestMessageAssembly:
         messages = formatter.format(ctx, task="Build the API")
         system_content = messages[0]["content"]
 
-        assert "Here is relevant background information:" in system_content
-        assert "Previous attempts at similar tasks failed because:" in system_content
-        assert "Similar tasks have been answered like this:" in system_content
+        # XML-structured prompt: context, instructions, examples, output_format
+        assert "<context>" in system_content
+        assert "</context>" in system_content
+        assert "<instructions>" in system_content
+        assert "<examples>" in system_content
+        assert "<output_format>" in system_content
+        # Content from the enriched context should be present
+        assert "GraphBot" in system_content
+        assert "auth missing" in system_content
+        assert "deploy app" in system_content
 
     def test_custom_system_preamble(self) -> None:
+        """Custom preamble is stored but XML-structured prompt uses domain role."""
         ctx = EnrichedContext()
         formatter = ContextFormatter(system_preamble="You are GraphBot.")
         messages = formatter.format(ctx, task="test")
-        assert messages[0]["content"].startswith("You are GraphBot.")
+        # With XML-structured prompts, the system message starts with the domain role
+        system_content = messages[0]["content"]
+        assert "expert" in system_content.lower() or "analyst" in system_content.lower()
+        assert "<instructions>" in system_content

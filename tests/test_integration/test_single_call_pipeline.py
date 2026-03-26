@@ -123,11 +123,12 @@ def _is_decomposer_call(messages: list[dict[str, Any]]) -> bool:
 
 
 def _is_single_call(messages: list[dict[str, Any]]) -> bool:
-    """Check if a call log entry is a single-call (system starts with assistant)."""
+    """Check if a call log entry is a single-call (system has XML-structured prompt)."""
     if not messages:
         return False
     system_content = messages[0].get("content", "")
-    return system_content.startswith("You are a helpful assistant")
+    # Single-call path uses XML-structured prompts with <instructions> section
+    return "<instructions>" in system_content and "<output_format>" in system_content
 
 
 # ---------------------------------------------------------------------------
