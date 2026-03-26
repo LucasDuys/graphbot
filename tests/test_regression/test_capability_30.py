@@ -65,13 +65,14 @@ def _safety_refusal() -> CompletionResult:
 
 def _make_orchestrator(
     responses: list[CompletionResult],
+    force_decompose: bool = False,
 ) -> tuple[Orchestrator, SequentialMockProvider]:
     """Create an Orchestrator with in-memory store and mock provider."""
     store = GraphStore(db_path=None)
     store.initialize()
     provider = SequentialMockProvider(responses)
     router = ModelRouter(provider=provider)
-    orchestrator = Orchestrator(store, router)
+    orchestrator = Orchestrator(store, router, force_decompose=force_decompose)
     return orchestrator, provider
 
 
@@ -287,7 +288,7 @@ class TestDecomposition:
                 _completion("Part B analysis"),
                 _completion("Aggregated result"),
                 _completion("Synthesized comparison."),
-            ])
+            ], force_decompose=True)
             result = await orchestrator.process(task_text)
             assert isinstance(result, ExecutionResult)
             # Should have called provider multiple times (decompose + execute)

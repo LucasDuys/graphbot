@@ -258,6 +258,21 @@ class TestSkipEntityResolution:
         orch._constitutional_checker = _make_safe_constitutional()
         orch._verification_config = VerificationConfig()
         orch._enable_replan = False
+        orch._force_decompose = False
+        orch._context_enricher = MagicMock()
+        orch._context_enricher.enrich.return_value = MagicMock(
+            entities=(), memories=(), reflections=(), patterns=(),
+            conversation_turns=(), entity_tokens=0, memory_tokens=0,
+            reflection_tokens=0, pattern_tokens=0, conversation_tokens=0,
+            total_tokens=0, relationships=(), relationship_tokens=0,
+            community_summaries=(), community_tokens=0,
+        )
+        orch._single_executor = AsyncMock()
+        orch._single_executor.execute.return_value = ExecutionResult(
+            root_id="test", output="Why did the chicken cross the road?", success=True,
+        )
+        orch._conversation_memory = MagicMock()
+        orch._conversation_memory.format_as_messages.return_value = []
 
         result = await orch.process("Tell me a joke")
         assert result.success is True
@@ -308,6 +323,11 @@ class TestSkipEntityResolution:
         orch._constitutional_checker = _make_safe_constitutional()
         orch._verification_config = VerificationConfig()
         orch._enable_replan = False
+        orch._force_decompose = False
+        orch._context_enricher = MagicMock()
+        orch._single_executor = AsyncMock()
+        orch._conversation_memory = MagicMock()
+        orch._conversation_memory.format_as_messages.return_value = []
 
         await orch.process("Compare Python and JavaScript")
         # Entity resolution SHOULD have been called for complex task
@@ -371,6 +391,21 @@ class TestPipelineLatencyLogging:
         orch._constitutional_checker = _make_safe_constitutional()
         orch._verification_config = VerificationConfig()
         orch._enable_replan = False
+        orch._force_decompose = False
+        orch._context_enricher = MagicMock()
+        orch._context_enricher.enrich.return_value = MagicMock(
+            entities=(), memories=(), reflections=(), patterns=(),
+            conversation_turns=(), entity_tokens=0, memory_tokens=0,
+            reflection_tokens=0, pattern_tokens=0, conversation_tokens=0,
+            total_tokens=0, relationships=(), relationship_tokens=0,
+            community_summaries=(), community_tokens=0,
+        )
+        orch._single_executor = AsyncMock()
+        orch._single_executor.execute.return_value = ExecutionResult(
+            root_id="test", output="A joke", success=True,
+        )
+        orch._conversation_memory = MagicMock()
+        orch._conversation_memory.format_as_messages.return_value = []
 
         with caplog.at_level(logging.DEBUG, logger="core_gb.orchestrator"):
             await orch.process("Tell me a joke")

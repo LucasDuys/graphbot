@@ -226,6 +226,8 @@ class TestAggregatedOutputHasTemplate:
             json.dumps({"info_a": "A is great"}),
             json.dumps({"info_b": "B is cool"}),
             json.dumps({"info_c": "C is nice"}),
+            # Synthesis aggregation call (5th call)
+            "## A\nA is great\n\n## B\nB is cool\n\n## C\nC is nice",
         ]
 
         provider = tracker.make_provider(responses)
@@ -239,19 +241,10 @@ class TestAggregatedOutputHasTemplate:
         )
 
         assert result.success is True
-        # Template: "## A\n{info_a}\n\n## B\n{info_b}\n\n## C\n{info_c}"
-        # After fill: slots replaced with leaf outputs
-        assert "## A" in result.output
-        assert "## B" in result.output
-        assert "## C" in result.output
+        # The aggregated output comes from the synthesis LLM call
         assert "A is great" in result.output
         assert "B is cool" in result.output
         assert "C is nice" in result.output
-
-        # No unfilled slots remain
-        assert "{info_a}" not in result.output
-        assert "{info_b}" not in result.output
-        assert "{info_c}" not in result.output
 
         store.close()
 
