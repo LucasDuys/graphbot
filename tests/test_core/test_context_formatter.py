@@ -184,7 +184,7 @@ class TestTokenBudgetIntegration:
             user_message_reserve=0,
             response_reserve=0,
         )
-        formatter = ContextFormatter(token_budget=budget)
+        formatter = ContextFormatter(token_budget=budget, complexity=3)
         messages = formatter.format(ctx, task="test")
         system_content = messages[0]["content"]
         # Entity content should be in the context section
@@ -257,7 +257,7 @@ class TestMessageAssembly:
             reflection_tokens=15,
             pattern_tokens=10,
         )
-        formatter = ContextFormatter()
+        formatter = ContextFormatter(complexity=4)
         messages = formatter.format(ctx, task="Build the API")
         system_content = messages[0]["content"]
 
@@ -273,9 +273,9 @@ class TestMessageAssembly:
         assert "deploy app" in system_content
 
     def test_custom_system_preamble(self) -> None:
-        """Custom preamble is stored but XML-structured prompt uses domain role."""
+        """Custom preamble is stored but XML-structured prompt uses domain role at high complexity."""
         ctx = EnrichedContext()
-        formatter = ContextFormatter(system_preamble="You are GraphBot.")
+        formatter = ContextFormatter(system_preamble="You are GraphBot.", complexity=3)
         messages = formatter.format(ctx, task="test")
         # With XML-structured prompts, the system message starts with the domain role
         system_content = messages[0]["content"]

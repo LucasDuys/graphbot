@@ -128,11 +128,11 @@ class TestPromptAssembly:
         router = ModelRouter(provider=provider)
         executor = SingleCallExecutor(router)
 
-        await executor.execute("What is AI?", _empty_context())
+        await executor.execute("What is AI?", _empty_context(), complexity=4)
 
         messages = provider.captured_messages[0]
         assert messages[0]["role"] == "system"
-        # XML-structured prompt: contains domain role and instruction sections
+        # XML-structured prompt at high complexity: domain role and instruction sections
         system_content = messages[0]["content"]
         assert "<instructions>" in system_content
         assert "<examples>" in system_content
@@ -155,7 +155,7 @@ class TestPromptAssembly:
         executor = SingleCallExecutor(router)
 
         ctx = _rich_context()
-        await executor.execute("Who is Lucas?", ctx)
+        await executor.execute("Who is Lucas?", ctx, complexity=3)
 
         system_content = provider.captured_messages[0][0]["content"]
         assert "<context>" in system_content
@@ -399,7 +399,7 @@ class TestFullPromptIntegration:
             ctx,
             conversation_history=history,
             pattern_hints=patterns,
-            complexity=2,
+            complexity=4,
         )
 
         assert result.success is True

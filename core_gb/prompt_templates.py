@@ -562,32 +562,35 @@ def build_structured_system_prompt(
     context_text: str = "",
     pattern_hints_text: str = "",
 ) -> str:
-    """Build a complete XML-structured system prompt for the given domain and complexity.
+    """Build a system prompt scaled to task complexity.
 
-    Assembles the following sections:
-    - Role assignment (always present)
-    - <context> (if context_text is provided)
-    - <instructions> (always present, includes domain guidance + edge case notes)
-    - <examples> (few-shot examples from the template)
-    - <output_format> (expected response structure)
-    - Chain-of-thought instruction (if complexity >= COT_COMPLEXITY_THRESHOLD)
+    For simple tasks (complexity 1-2): minimal prompt with role + context only.
+    Small models get confused by verbose instructions, examples, and XML tags
+    on simple tasks. Keep it lean.
+
+    For medium tasks (complexity 3): add instructions and output format.
+    For hard tasks (complexity 4-5): full prompt with examples, edge cases,
+    and chain-of-thought.
 
     Args:
         domain: The task domain for template selection.
-        complexity: Task complexity (1-5). Activates chain-of-thought at >= 3.
+        complexity: Task complexity (1-5). Controls prompt verbosity.
         context_text: Pre-formatted context string to wrap in <context> tags.
         pattern_hints_text: Pre-formatted pattern hints to include in context.
 
     Returns:
-        A complete system prompt string with XML-structured sections.
+        A complete system prompt string.
     """
     template = get_template(domain)
     parts: list[str] = []
 
-    # Role assignment
-    parts.append(template.role)
+    # Role assignment -- always present but simplified for easy tasks
+    if complexity <= 2:
+        parts.append("You are a helpful, accurate assistant. Answer directly and concisely.")
+    else:
+        parts.append(template.role)
 
-    # Context section
+    # Context section -- always included if available
     context_parts: list[str] = []
     if context_text:
         context_parts.append(context_text)
@@ -595,16 +598,21 @@ def build_structured_system_prompt(
         context_parts.append(pattern_hints_text)
     if context_parts:
         combined_context = "\n\n".join(context_parts)
-        parts.append(f"\n<context>\n{combined_context}\n</context>")
+        if complexity <= 2:
+            # No XML tags for simple tasks -- just inline context
+            parts.append(f"\nRelevant information:\n{combined_context}")
+        else:
+            parts.append(f"\n<context>\n{combined_context}\n</context>")
 
-    # Instructions section
-    instructions_body = template.instructions
-    if template.edge_case_notes:
-        instructions_body += f"\n\nEdge cases and failure modes:\n{template.edge_case_notes}"
-    parts.append(f"\n<instructions>\n{instructions_body}\n</instructions>")
+    # Instructions -- only for complexity >= 3
+    if complexity >= 3:
+        instructions_body = template.instructions
+        if complexity >= 4 and template.edge_case_notes:
+            instructions_body += f"\n\nEdge cases and failure modes:\n{template.edge_case_notes}"
+        parts.append(f"\n<instructions>\n{instructions_body}\n</instructions>")
 
-    # Examples section
-    if template.examples:
+    # Examples -- only for complexity >= 4 (hard tasks benefit from few-shot)
+    if complexity >= 4 and template.examples:
         example_lines: list[str] = []
         for i, ex in enumerate(template.examples, 1):
             example_lines.append(f"Example {i}:")
@@ -616,8 +624,8 @@ def build_structured_system_prompt(
         examples_text = "\n".join(example_lines).rstrip()
         parts.append(f"\n<examples>\n{examples_text}\n</examples>")
 
-    # Output format section
-    if template.output_format:
+    # Output format -- only for complexity >= 3
+    if complexity >= 3 and template.output_format:
         parts.append(f"\n<output_format>\n{template.output_format}\n</output_format>")
 
     # Chain-of-thought for complex tasks

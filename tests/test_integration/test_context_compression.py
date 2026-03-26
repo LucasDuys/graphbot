@@ -750,7 +750,7 @@ class TestEndToEndPipeline:
         assert len(compressed) > 0
 
         # Step 3: Format into LLM messages.
-        formatter = ContextFormatter()
+        formatter = ContextFormatter(complexity=3)
         messages = formatter.format(enriched, task="What does Alice work on?")
 
         assert isinstance(messages, list)

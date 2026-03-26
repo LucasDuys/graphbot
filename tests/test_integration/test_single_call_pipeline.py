@@ -123,12 +123,19 @@ def _is_decomposer_call(messages: list[dict[str, Any]]) -> bool:
 
 
 def _is_single_call(messages: list[dict[str, Any]]) -> bool:
-    """Check if a call log entry is a single-call (system has XML-structured prompt)."""
+    """Check if a call log entry is a single-call (not a decomposition request)."""
     if not messages:
         return False
     system_content = messages[0].get("content", "")
-    # Single-call path uses XML-structured prompts with <instructions> section
-    return "<instructions>" in system_content and "<output_format>" in system_content
+    # Single-call path uses prompts from build_structured_system_prompt:
+    # - Simple tasks (complexity 1-2): "You are a helpful, accurate assistant."
+    # - Complex tasks (complexity 3+): XML-structured with <instructions>
+    # Decomposition calls produce JSON with "nodes" key.
+    is_single = (
+        "You are a helpful, accurate assistant" in system_content
+        or "<instructions>" in system_content
+    )
+    return is_single
 
 
 # ---------------------------------------------------------------------------

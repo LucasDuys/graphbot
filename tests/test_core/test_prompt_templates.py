@@ -88,21 +88,21 @@ class TestBuildStructuredPrompt:
 
     def test_contains_instructions_section(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.SYNTHESIS, complexity=1,
+            domain=Domain.SYNTHESIS, complexity=3,
         )
         assert "<instructions>" in prompt
         assert "</instructions>" in prompt
 
     def test_contains_examples_section(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.CODE, complexity=1,
+            domain=Domain.CODE, complexity=4,
         )
         assert "<examples>" in prompt
         assert "</examples>" in prompt
 
     def test_contains_output_format_section(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.WEB, complexity=1,
+            domain=Domain.WEB, complexity=3,
         )
         assert "<output_format>" in prompt
         assert "</output_format>" in prompt
@@ -110,7 +110,7 @@ class TestBuildStructuredPrompt:
     def test_context_section_when_context_provided(self) -> None:
         prompt = build_structured_system_prompt(
             domain=Domain.SYNTHESIS,
-            complexity=1,
+            complexity=3,
             context_text="User prefers Python.",
         )
         assert "<context>" in prompt
@@ -119,14 +119,14 @@ class TestBuildStructuredPrompt:
 
     def test_no_context_section_when_empty(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.SYNTHESIS, complexity=1, context_text="",
+            domain=Domain.SYNTHESIS, complexity=3, context_text="",
         )
         assert "<context>" not in prompt
 
     def test_pattern_hints_in_context(self) -> None:
         prompt = build_structured_system_prompt(
             domain=Domain.SYNTHESIS,
-            complexity=1,
+            complexity=3,
             context_text="some context",
             pattern_hints_text="Pattern: deploy (5 successes)",
         )
@@ -135,14 +135,14 @@ class TestBuildStructuredPrompt:
 
     def test_role_at_start(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.CODE, complexity=1,
+            domain=Domain.CODE, complexity=3,
         )
         template = get_template(Domain.CODE)
         assert prompt.startswith(template.role)
 
     def test_edge_case_notes_in_instructions(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.FILE, complexity=1,
+            domain=Domain.FILE, complexity=4,
         )
         template = get_template(Domain.FILE)
         assert template.edge_case_notes in prompt
@@ -154,7 +154,7 @@ class TestBuildStructuredPrompt:
 
     def test_few_shot_examples_present(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.SYNTHESIS, complexity=1,
+            domain=Domain.SYNTHESIS, complexity=4,
         )
         assert "Example 1:" in prompt
         assert "Example 2:" in prompt
@@ -164,9 +164,19 @@ class TestBuildStructuredPrompt:
 
     def test_few_shot_examples_include_why(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.CODE, complexity=1,
+            domain=Domain.CODE, complexity=4,
         )
         assert "Why:" in prompt
+
+    def test_simple_tasks_get_lean_prompt(self) -> None:
+        """Complexity 1-2 tasks get minimal prompts without XML tags."""
+        prompt = build_structured_system_prompt(
+            domain=Domain.CODE, complexity=1,
+        )
+        assert prompt.startswith("You are a helpful, accurate assistant")
+        assert "<instructions>" not in prompt
+        assert "<examples>" not in prompt
+        assert "<output_format>" not in prompt
 
 
 class TestChainOfThought:
@@ -211,25 +221,25 @@ class TestDomainSpecificPrompts:
 
     def test_code_domain_mentions_code(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.CODE, complexity=1,
+            domain=Domain.CODE, complexity=3,
         )
         assert "code" in prompt.lower()
 
     def test_web_domain_mentions_sources(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.WEB, complexity=1,
+            domain=Domain.WEB, complexity=3,
         )
         assert "source" in prompt.lower()
 
     def test_file_domain_mentions_file(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.FILE, complexity=1,
+            domain=Domain.FILE, complexity=3,
         )
         assert "file" in prompt.lower()
 
     def test_different_domains_produce_different_prompts(self) -> None:
         prompts = {
-            domain: build_structured_system_prompt(domain=domain, complexity=1)
+            domain: build_structured_system_prompt(domain=domain, complexity=3)
             for domain in Domain
         }
         # All prompts should be unique

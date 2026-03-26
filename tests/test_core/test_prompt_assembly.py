@@ -126,7 +126,7 @@ class TestFullPromptAssembly:
             entities=({"type": "Project", "name": "GraphBot", "details": "DAG engine"},),
             entity_tokens=10,
         )
-        formatter = ContextFormatter(domain=Domain.CODE, complexity=1)
+        formatter = ContextFormatter(domain=Domain.CODE, complexity=4)
         messages = formatter.format(ctx, task="Explain GraphBot")
 
         system_content = messages[0]["content"]
@@ -142,7 +142,7 @@ class TestFullPromptAssembly:
     def test_instructions_and_examples_present_without_context(self) -> None:
         """Even with empty context, instructions/examples/output_format are present."""
         ctx = _make_enriched_context()
-        formatter = ContextFormatter(domain=Domain.SYNTHESIS, complexity=1)
+        formatter = ContextFormatter(domain=Domain.SYNTHESIS, complexity=4)
         messages = formatter.format(ctx, task="Hello")
 
         system_content = messages[0]["content"]
@@ -178,7 +178,7 @@ class TestFullPromptAssembly:
     def test_domain_override_in_format(self) -> None:
         """Passing domain= to format() overrides the instance default."""
         ctx = _make_enriched_context()
-        formatter = ContextFormatter(domain=Domain.SYNTHESIS)
+        formatter = ContextFormatter(domain=Domain.SYNTHESIS, complexity=3)
         messages = formatter.format(ctx, task="Write code", domain=Domain.CODE)
 
         system_content = messages[0]["content"]
@@ -206,7 +206,7 @@ class TestXMLStructure:
     def test_context_tag_wraps_entity_content(self) -> None:
         prompt = build_structured_system_prompt(
             domain=Domain.SYNTHESIS,
-            complexity=1,
+            complexity=3,
             context_text="Entity: GraphBot -- a DAG engine for LLM orchestration",
         )
         context_body = _extract_xml_section(prompt, "context")
@@ -215,7 +215,7 @@ class TestXMLStructure:
 
     def test_instructions_tag_contains_domain_guidance(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.CODE, complexity=1,
+            domain=Domain.CODE, complexity=3,
         )
         instructions_body = _extract_xml_section(prompt, "instructions")
         assert instructions_body is not None
@@ -223,7 +223,7 @@ class TestXMLStructure:
 
     def test_examples_tag_contains_numbered_examples(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.WEB, complexity=1,
+            domain=Domain.WEB, complexity=4,
         )
         examples_body = _extract_xml_section(prompt, "examples")
         assert examples_body is not None
@@ -233,7 +233,7 @@ class TestXMLStructure:
 
     def test_output_format_tag_contains_format_spec(self) -> None:
         prompt = build_structured_system_prompt(
-            domain=Domain.FILE, complexity=1,
+            domain=Domain.FILE, complexity=3,
         )
         format_body = _extract_xml_section(prompt, "output_format")
         assert format_body is not None
@@ -242,7 +242,7 @@ class TestXMLStructure:
     def test_context_includes_pattern_hints(self) -> None:
         prompt = build_structured_system_prompt(
             domain=Domain.CODE,
-            complexity=1,
+            complexity=3,
             context_text="Some entities",
             pattern_hints_text="Pattern: deploy (5 successes)",
         )
@@ -254,7 +254,7 @@ class TestXMLStructure:
     def test_no_context_tag_when_both_empty(self) -> None:
         prompt = build_structured_system_prompt(
             domain=Domain.SYNTHESIS,
-            complexity=1,
+            complexity=3,
             context_text="",
             pattern_hints_text="",
         )
@@ -264,7 +264,7 @@ class TestXMLStructure:
         """Sections appear in order: role, context, instructions, examples, output_format."""
         prompt = build_structured_system_prompt(
             domain=Domain.CODE,
-            complexity=1,
+            complexity=4,
             context_text="some context data",
         )
         ctx_pos = prompt.index("<context>")
@@ -282,12 +282,12 @@ class TestXMLStructure:
 class TestDomainRoleAssignment:
     """Role assignment varies by domain, each domain gets a unique role."""
 
-    def test_every_domain_has_distinct_role_in_prompt(self) -> None:
-        """Each Domain produces a different opening role string in the prompt."""
+    def test_every_domain_has_distinct_role_at_high_complexity(self) -> None:
+        """Each Domain produces a different opening role string at complexity >= 3."""
         prompts: dict[Domain, str] = {}
         for domain in Domain:
             prompts[domain] = build_structured_system_prompt(
-                domain=domain, complexity=1,
+                domain=domain, complexity=3,
             )
         # Each prompt should start with a different role
         starts: set[str] = set()
@@ -298,10 +298,18 @@ class TestDomainRoleAssignment:
             starts.add(role_text)
         assert len(starts) == len(Domain)
 
-    def test_role_appears_before_any_xml_tag(self) -> None:
+    def test_simple_tasks_get_generic_role(self) -> None:
+        """At complexity 1-2, all domains get the same generic role."""
         for domain in Domain:
             prompt = build_structured_system_prompt(
                 domain=domain, complexity=1,
+            )
+            assert prompt.startswith("You are a helpful, accurate assistant")
+
+    def test_role_appears_before_any_xml_tag(self) -> None:
+        for domain in Domain:
+            prompt = build_structured_system_prompt(
+                domain=domain, complexity=3,
             )
             template = get_template(domain)
             assert prompt.startswith(template.role), (
@@ -310,28 +318,28 @@ class TestDomainRoleAssignment:
 
     def test_synthesis_role_in_assembled_prompt(self) -> None:
         ctx = _make_enriched_context()
-        formatter = ContextFormatter(domain=Domain.SYNTHESIS)
+        formatter = ContextFormatter(domain=Domain.SYNTHESIS, complexity=3)
         messages = formatter.format(ctx, task="Summarize")
         system_content = messages[0]["content"]
         assert "analyst" in system_content.lower() or "synthesizer" in system_content.lower()
 
     def test_code_role_in_assembled_prompt(self) -> None:
         ctx = _make_enriched_context()
-        formatter = ContextFormatter(domain=Domain.CODE)
+        formatter = ContextFormatter(domain=Domain.CODE, complexity=3)
         messages = formatter.format(ctx, task="Write code")
         system_content = messages[0]["content"]
         assert "developer" in system_content.lower()
 
     def test_browser_role_in_assembled_prompt(self) -> None:
         ctx = _make_enriched_context()
-        formatter = ContextFormatter(domain=Domain.BROWSER)
+        formatter = ContextFormatter(domain=Domain.BROWSER, complexity=3)
         messages = formatter.format(ctx, task="Navigate page")
         system_content = messages[0]["content"]
         assert "automation" in system_content.lower() or "browser" in system_content.lower()
 
     def test_comms_role_in_assembled_prompt(self) -> None:
         ctx = _make_enriched_context()
-        formatter = ContextFormatter(domain=Domain.COMMS)
+        formatter = ContextFormatter(domain=Domain.COMMS, complexity=3)
         messages = formatter.format(ctx, task="Draft email")
         system_content = messages[0]["content"]
         assert "communication" in system_content.lower()
@@ -424,14 +432,14 @@ class TestFewShotExamples:
 
     def test_examples_present_for_every_domain(self) -> None:
         for domain in Domain:
-            prompt = build_structured_system_prompt(domain=domain, complexity=1)
+            prompt = build_structured_system_prompt(domain=domain, complexity=4)
             examples_body = _extract_xml_section(prompt, "examples")
             assert examples_body is not None, f"No <examples> section for {domain}"
             assert "Example 1:" in examples_body, f"No Example 1 for {domain}"
 
     def test_examples_have_input_output_why(self) -> None:
         for domain in Domain:
-            prompt = build_structured_system_prompt(domain=domain, complexity=1)
+            prompt = build_structured_system_prompt(domain=domain, complexity=4)
             examples_body = _extract_xml_section(prompt, "examples")
             assert examples_body is not None
             assert "Input:" in examples_body
@@ -441,7 +449,7 @@ class TestFewShotExamples:
 
     def test_at_least_three_examples_per_domain(self) -> None:
         for domain in Domain:
-            prompt = build_structured_system_prompt(domain=domain, complexity=1)
+            prompt = build_structured_system_prompt(domain=domain, complexity=4)
             examples_body = _extract_xml_section(prompt, "examples")
             assert examples_body is not None
             assert "Example 3:" in examples_body, (
@@ -450,7 +458,7 @@ class TestFewShotExamples:
 
     def test_examples_in_assembled_formatter_output(self) -> None:
         ctx = _make_enriched_context()
-        formatter = ContextFormatter(domain=Domain.WEB)
+        formatter = ContextFormatter(domain=Domain.WEB, complexity=4)
         messages = formatter.format(ctx, task="Find info")
         system_content = messages[0]["content"]
         assert "<examples>" in system_content
@@ -467,7 +475,7 @@ class TestOutputFormatSection:
 
     def test_output_format_present_for_every_domain(self) -> None:
         for domain in Domain:
-            prompt = build_structured_system_prompt(domain=domain, complexity=1)
+            prompt = build_structured_system_prompt(domain=domain, complexity=3)
             format_body = _extract_xml_section(prompt, "output_format")
             assert format_body is not None, f"No <output_format> for {domain}"
             assert len(format_body.strip()) > 0
@@ -475,7 +483,7 @@ class TestOutputFormatSection:
     def test_output_format_differs_by_domain(self) -> None:
         formats: dict[Domain, str] = {}
         for domain in Domain:
-            prompt = build_structured_system_prompt(domain=domain, complexity=1)
+            prompt = build_structured_system_prompt(domain=domain, complexity=3)
             format_body = _extract_xml_section(prompt, "output_format")
             assert format_body is not None
             formats[domain] = format_body.strip()
@@ -484,13 +492,13 @@ class TestOutputFormatSection:
         assert len(unique_formats) == len(Domain), "Some domains share the same output format"
 
     def test_code_format_mentions_code_blocks(self) -> None:
-        prompt = build_structured_system_prompt(domain=Domain.CODE, complexity=1)
+        prompt = build_structured_system_prompt(domain=Domain.CODE, complexity=3)
         format_body = _extract_xml_section(prompt, "output_format")
         assert format_body is not None
         assert "code block" in format_body.lower()
 
     def test_comms_format_mentions_channel(self) -> None:
-        prompt = build_structured_system_prompt(domain=Domain.COMMS, complexity=1)
+        prompt = build_structured_system_prompt(domain=Domain.COMMS, complexity=3)
         format_body = _extract_xml_section(prompt, "output_format")
         assert format_body is not None
         assert "channel" in format_body.lower() or "email" in format_body.lower()
@@ -507,7 +515,7 @@ class TestEdgeCases:
     def test_empty_enriched_context(self) -> None:
         """All-empty EnrichedContext still produces valid messages."""
         ctx = _make_enriched_context()
-        formatter = ContextFormatter()
+        formatter = ContextFormatter(complexity=4)
         messages = formatter.format(ctx, task="Hello")
 
         assert len(messages) >= 2
@@ -525,7 +533,7 @@ class TestEdgeCases:
         """build_structured_system_prompt with empty strings produces valid prompt."""
         prompt = build_structured_system_prompt(
             domain=Domain.SYNTHESIS,
-            complexity=1,
+            complexity=4,
             context_text="",
             pattern_hints_text="",
         )
@@ -566,7 +574,7 @@ class TestEdgeCases:
             user_message_reserve=100,
             response_reserve=100,
         )
-        formatter = ContextFormatter(token_budget=budget)
+        formatter = ContextFormatter(token_budget=budget, complexity=3)
         messages = formatter.format(ctx, task="Summarize")
 
         # Should still produce valid messages
@@ -587,7 +595,7 @@ class TestEdgeCases:
             ),
             entity_tokens=20,
         )
-        formatter = ContextFormatter()
+        formatter = ContextFormatter(complexity=3)
         messages = formatter.format(ctx, task="Compare numpy and pandas")
         system_content = messages[0]["content"]
         assert "numpy" in system_content
@@ -616,7 +624,7 @@ class TestEdgeCases:
         """build_structured_system_prompt with only pattern_hints_text."""
         prompt = build_structured_system_prompt(
             domain=Domain.SYNTHESIS,
-            complexity=1,
+            complexity=3,
             context_text="",
             pattern_hints_text="Pattern: build API (7 successes)",
         )
@@ -762,7 +770,7 @@ class TestSingleCallExecutorBuildMessages:
             task="Describe tool",
             graph_context=gc,
             domain=Domain.CODE,
-            complexity=1,
+            complexity=4,
         )
         system_content = messages[0]["content"]
 
@@ -835,10 +843,10 @@ class TestSingleCallExecutorBuildMessages:
         gc = _make_graph_context()
 
         code_messages = executor._build_messages(
-            task="task", graph_context=gc, domain=Domain.CODE, complexity=1,
+            task="task", graph_context=gc, domain=Domain.CODE, complexity=3,
         )
         web_messages = executor._build_messages(
-            task="task", graph_context=gc, domain=Domain.WEB, complexity=1,
+            task="task", graph_context=gc, domain=Domain.WEB, complexity=3,
         )
 
         code_system = code_messages[0]["content"]
