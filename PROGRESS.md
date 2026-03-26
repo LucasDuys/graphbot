@@ -163,8 +163,23 @@ All 20 phases complete. GraphBot is a full autonomous agent framework with verif
 - **GraphBot is now a full autonomous agent framework**
 - **Total: 1457 tests, all passing**
 
+## Phase 24 Completed (2026-03-26)
+- [x] T217: Prompt engineering overhaul -- XML-structured prompts with domain roles, few-shot, CoT (37 tests)
+- [x] T218: GraphRAG-style context assembly -- subgraph retrieval, community summaries, XML docs (29 tests)
+- [x] T219: Prompt compression module -- TF-IDF sentence scoring, 2-4x compression (17 tests)
+- [x] T220: Smart model selection -- Groq routing for easy, 70B for hard, cost budget (27 tests)
+- [x] T221: External benchmark comparison -- vs OpenHands, CrewAI, AutoGPT, LangGraph (docs only)
+- [x] T222: LangSmith prompt management -- versioning, A/B testing script (25 tests)
+- [x] T223: Prompt engineering integration tests (59 tests)
+- [x] T224: Context assembly + compression integration tests (39 tests)
+- [x] T225: Model routing integration tests + benchmark script (25 tests)
+- [x] T226: Benchmark re-run + README update with honest results
+- **Key insight: Prompt verbosity must scale with model capability. 8B models need lean prompts; complex XML structure only helps at complexity >= 3.**
+- **Benchmark: 3.00-3.53/5 quality at $0.001-0.002/15 tasks (20-33x cheaper than GPT-4o)**
+- **Total: 2999 tests, all passing**
+
 ## In Progress
-_Nothing. All planned phases (13-20) complete._
+_Nothing. All planned phases (13-24) complete._
 
 ## Blocked
 _Nothing blocked._

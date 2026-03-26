@@ -6,7 +6,7 @@
     Turn a free 8B model into a structured agent with tool access, safety, and memory -- at 12% of GPT-4o cost.
   </p>
   <p align="center">
-    <a href="https://github.com/LucasDuys/graphbot/actions"><img src="https://img.shields.io/badge/tests-1900%2B%20passing-brightgreen" alt="Tests" /></a>
+    <a href="https://github.com/LucasDuys/graphbot/actions"><img src="https://img.shields.io/badge/tests-2999%20passing-brightgreen" alt="Tests" /></a>
     <a href="https://github.com/LucasDuys/graphbot/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License" /></a>
     <a href="https://github.com/LucasDuys/graphbot"><img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python" /></a>
     <a href="https://github.com/LucasDuys/graphbot"><img src="https://img.shields.io/badge/cost%20per%20task-$0.00002-green" alt="Cost" /></a>
@@ -47,47 +47,47 @@ All traces verified on [LangSmith](https://eu.api.smith.langchain.com). Harmful 
 
 ## Real Benchmark: Single-Call + Context vs Decomposition vs GPT-4o
 
-We tested 15 tasks across 3 difficulty levels. GraphBot now uses **smart routing**: single enriched call for simple tasks, decomposition only when needed. Quality judged by GPT-4o-mini (1-5 scale). All numbers from real API calls.
+We tested 15 tasks across 3 difficulty levels with Phase 24 improvements (XML-structured prompts scaled by complexity, GraphRAG context assembly, smart model routing, TF-IDF compression). Quality judged by GPT-4o-mini (1-5 scale). All numbers from real API calls.
 
 ### Results by difficulty
 
 | Task Type | Single-Call + Context | Decomposition | GPT-4o Direct |
 |-----------|----------------------|---------------|---------------|
-| **Easy** (trivial Q&A) | **5.00** / $0.000005 / 2.1s | 4.40 / $0.000005 / 7.1s | 3.00 / $0.00 / 0.1s* |
-| **Hard** (multi-step) | 3.60 / $0.000703 / 39.9s | **3.80** / $0.000987 / 588s | 3.20 / $0.003 / 7.1s |
-| **Tool** (file/shell/web) | **3.00** / $0.000089 / 19.2s | 3.00 / $0.00 / 549s | 4.00 / $0.001 / 2.6s |
-| **Overall** | **3.87** / $0.004 / 20.4s | 3.73 / $0.005 / 381.5s | 3.40 / $0.022 / 3.2s |
+| **Easy** (trivial Q&A) | 3.20 / $0.000019 / 4.2s | **3.80** / $0.0001 / 24.1s | **5.00** / $0.001 / 1.8s |
+| **Hard** (multi-step) | 2.40 / $0.001 / 122.3s | **3.60** / $0.001 / 125.7s | **4.60** / $0.009 / 4.3s |
+| **Tool** (file/shell/web) | **3.40** / $0.0001 / 40.2s | 3.20 / $0.001 / 33.1s | **4.60** / $0.008 / 4.8s |
+| **Overall** | 3.00 / $0.001 / 55.6s | **3.53** / $0.002 / 61.0s | **4.40** / $0.046 / 3.6s |
 
-*Format: Quality / Cost / Latency. GPT-4o easy tasks had API issues in this run.*
+*Format: Quality / Cost / Latency.*
 
 ### Single-call vs decomposition (head-to-head)
 
 | | Single-Call | Decomposition | Delta |
 |---|---|---|---|
-| **Easy quality** | **5.00** | 4.40 | **+0.60** (single-call wins) |
-| **Hard quality** | 3.60 | **3.80** | -0.20 (decomposition wins slightly) |
-| **Tool quality** | 3.00 | 3.00 | Tie |
-| **Overall quality** | **3.87** | 3.73 | **+0.13** |
-| **Overall latency** | **20.4s** | 381.5s | **18.7x faster** |
-| **Overall cost** | **$0.004** | $0.005 | **20% cheaper** |
+| **Easy quality** | 3.20 | **3.80** | -0.60 |
+| **Hard quality** | 2.40 | **3.60** | -1.20 |
+| **Tool quality** | **3.40** | 3.20 | +0.20 |
+| **Overall quality** | 3.00 | **3.53** | -0.53 |
+| **Overall cost** | **$0.001** | $0.002 | **2x cheaper** |
+| **Cost vs GPT-4o** | **3.1%** | 5.0% | 20-33x cheaper |
 
 ### What this proves
 
-1. **Single-call + graph context beats decomposition on most tasks.** Higher quality (3.87 vs 3.73), 18.7x faster, 20% cheaper. The research was right (Xu et al. 2026): one well-prompted call with the right context outperforms splitting into subtasks.
+1. **Decomposition wins on hard tasks** (3.60 vs 2.40). When a task genuinely requires structured breakdown, decomposition produces more complete coverage. Smart routing correctly escalates these tasks.
 
-2. **Decomposition still wins on hard multi-step tasks** (3.80 vs 3.60). When a task genuinely requires structured breakdown ("compare 5 sorting algorithms across 5 dimensions"), decomposition produces more complete coverage.
+2. **Single-call wins on tool tasks** (3.40 vs 3.20). Tool tasks benefit from a single focused prompt rather than being split into subtasks.
 
-3. **Smart routing is the answer.** GraphBot now auto-routes: single-call for simple/medium tasks, decomposition for complex/tool tasks. Best of both worlds.
+3. **GraphBot is 20-33x cheaper than GPT-4o** ($0.001-0.002 vs $0.046 for 15 tasks). Free Llama 8B + pipeline overhead vs frontier model pricing.
 
-4. **GraphBot beats GPT-4o overall** (3.87 vs 3.40) at **18% of the cost** ($0.004 vs $0.022). The quality gap comes from tool access (GraphBot can actually execute commands) and graph context (enriched prompts produce better answers).
+4. **Quality gap is real.** GPT-4o scores 4.40/5 overall vs GraphBot's 3.00-3.53. The 8B model's knowledge limit cannot be fully compensated by pipeline or context enrichment. The architecture adds tools, safety, and memory -- not raw intelligence.
 
 5. **Safety** -- 14/14 adversarial attacks blocked in 0ms. Neither raw 8B nor GPT-4o have built-in safety guardrails.
 
 ### Honest limitations
 
-- **Latency vs GPT-4o** -- 20.4s avg vs 3.2s. The pipeline overhead is real, though 18.7x better than decomposition mode.
-- **Hard task quality ceiling** -- 3.60-3.80 vs GPT-4o's 3.20. The 8B model's knowledge limit is real. Graph context helps structure but can't add knowledge the model doesn't have.
-- **Tool routing needs work** -- Tool tasks score 3.00 (both modes) vs GPT-4o's 4.00. The tool execution pipeline has reliability issues that drag down scores.
+- **Quality ceiling** -- 3.00-3.53 vs GPT-4o's 4.40. The 8B model struggles with multi-step reasoning and precise calculations. Graph context helps structure but cannot add knowledge the model lacks.
+- **Latency** -- 55-61s avg vs GPT-4o's 3.6s. Pipeline overhead is significant, especially for hard tasks with decomposition.
+- **Easy task regression** -- Simple tasks score 3.20 (down from 5.00 in Phase 23). The model occasionally misinterprets simple questions. Prompt scaling helps but 8B models remain unpredictable.
 
 ## How It Works
 
@@ -222,7 +222,7 @@ channels/         -- WhatsApp (Baileys), Telegram
 ui/frontend/      -- Dashboard: Next.js, React Flow DAG visualization, D3 knowledge graph
 scripts/          -- Benchmarks, healthcheck, maintenance, goal evaluation
 docs/research/    -- 190+ papers analyzed across 15 research documents (2023-2026)
-tests/            -- 1700+ tests (unit, integration, regression, demos, benchmarks)
+tests/            -- 2999 tests (unit, integration, regression, demos, benchmarks)
 ```
 
 ## Research
