@@ -123,18 +123,21 @@ Response
 
 ## Why Not Just Use...
 
-| | GraphBot | AutoGPT | CrewAI | LangGraph |
-|---|---|---|---|---|
-| **Cost per task** | $0.00002 | $0.05-0.50 | $0.01-0.10 | $0.01-0.05 |
-| **Free model support** | Native (Llama 8B) | GPT-4 required | GPT-4 recommended | Model agnostic |
-| **Task decomposition** | Recursive DAG | Serial chain | Role-based | Graph states |
-| **Knowledge graph** | Built-in (Kuzu) | None | None | None |
-| **Pattern learning** | Automatic | None | None | None |
-| **Self-correction** | 3-layer verification | Retry loop | None | Custom |
-| **Safety** | Constitutional + autonomy levels | None | None | None |
-| **Browser automation** | Playwright (built-in) | Plugin | Plugin | Custom |
-| **Tests** | 1500+ | ~200 | ~300 | ~500 |
-| **Conversation memory** | Per-chat, graph-backed | Session only | Session only | Checkpoints |
+| | GraphBot | OpenHands | CrewAI | AutoGPT | LangGraph |
+|---|---|---|---|---|---|
+| **Cost per task** | $0.00027 | $0.10-$2.00 | $0.01-$0.10 | $0.05-$0.50 | $0.01-$0.05 |
+| **Free model support** | Native (Llama 8B) | No (frontier required) | GPT-4 recommended | GPT-4 required | Model agnostic |
+| **Task quality** | 3.87/5 (general) | 80.9% SWE-bench (code) | Not published | Not published | Not published |
+| **Safety guardrails** | Constitutional + composition detection | Sandboxed execution | None | None | None |
+| **Knowledge graph** | Built-in (Kuzu, 11 types) | None | None | None | None |
+| **Pattern learning** | Automatic (0-token cache) | None | None | None | None |
+| **Task decomposition** | Recursive DAG | Multi-turn agent loop | Role-based | Serial chain | Graph states |
+| **Self-correction** | 3-layer verification | Agent retry loop | None | Retry loop | Custom |
+| **Browser automation** | Playwright (built-in) | Built-in | Plugin | Plugin | Custom |
+| **Production proven** | Research project | Yes | Yes | Pivoted | Yes (Klarna) |
+| **Community** | New | Large | 80K+ stars | 160K+ stars | LangChain ecosystem |
+
+**Honest take:** OpenHands + frontier models wins on code tasks. CrewAI/LangGraph win on ecosystem and production maturity. GraphBot wins on cost (37-7500x cheaper) and built-in intelligence (knowledge graph, safety, pattern learning). See the [full comparison with sources](docs/benchmarks/external_comparison.md).
 
 ## Quick Start
 
