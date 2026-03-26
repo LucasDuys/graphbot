@@ -26,6 +26,7 @@ from graph.activation import ActivationModel
 from graph.context import assemble_context, get_relevant_reflections
 from graph.resolver import EntityResolver
 from graph.store import GraphStore
+from graph.subgraph import SubgraphRetriever, SubgraphResult
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +56,15 @@ class EnrichedContext:
     reflections: tuple[dict[str, str], ...] = ()
     patterns: tuple[Pattern, ...] = ()
     conversation_turns: tuple[dict[str, str], ...] = ()
+    relationship_descriptions: tuple[str, ...] = ()
+    community_summaries: tuple[str, ...] = ()
     entity_tokens: int = 0
     memory_tokens: int = 0
     reflection_tokens: int = 0
     pattern_tokens: int = 0
     conversation_tokens: int = 0
+    relationship_tokens: int = 0
+    community_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -70,6 +75,8 @@ class EnrichedContext:
             + self.reflection_tokens
             + self.pattern_tokens
             + self.conversation_tokens
+            + self.relationship_tokens
+            + self.community_tokens
         )
 
 
@@ -103,6 +110,7 @@ class ContextEnricher:
         self._pattern_store = PatternStore(store)
         self._pattern_matcher = PatternMatcher()
         self._activation_model = ActivationModel()
+        self._subgraph_retriever = SubgraphRetriever(store)
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
@@ -148,6 +156,15 @@ class ContextEnricher:
         )
         remaining_budget -= (entity_tokens + memory_tokens)
 
+        # 1b. Retrieve subgraph context (relationships + communities)
+        resolved = self._resolver.resolve(task_description)
+        entity_ids = [eid for eid, _score in resolved]
+        relationships, communities, rel_tokens, comm_tokens = self._retrieve_subgraph(
+            entity_ids,
+            max_tokens=max(0, remaining_budget),
+        )
+        remaining_budget -= (rel_tokens + comm_tokens)
+
         # 2. Retrieve conversation history
         conversation_turns, conversation_tokens = self._retrieve_conversation(
             chat_id,
@@ -174,12 +191,61 @@ class ContextEnricher:
             reflections=tuple(reflections),
             patterns=tuple(patterns),
             conversation_turns=tuple(conversation_turns),
+            relationship_descriptions=tuple(relationships),
+            community_summaries=tuple(communities),
             entity_tokens=entity_tokens,
             memory_tokens=memory_tokens,
             reflection_tokens=reflection_tokens,
             pattern_tokens=pattern_tokens,
             conversation_tokens=conversation_tokens,
+            relationship_tokens=rel_tokens,
+            community_tokens=comm_tokens,
         )
+
+    def _retrieve_subgraph(
+        self,
+        entity_ids: list[str],
+        *,
+        max_tokens: int,
+    ) -> tuple[list[str], list[str], int, int]:
+        """Retrieve subgraph context: relationship descriptions and community summaries.
+
+        Uses SubgraphRetriever to perform multi-hop traversal, then extracts
+        relationship descriptions and community summaries with token budgeting.
+
+        Returns:
+            (relationship_descriptions, community_summaries, rel_tokens, comm_tokens)
+        """
+        if not entity_ids or max_tokens <= 0:
+            return [], [], 0, 0
+
+        subgraph = self._subgraph_retriever.retrieve_subgraph(entity_ids)
+
+        # Budget relationship descriptions first (more specific context).
+        rel_descriptions: list[str] = []
+        rel_tokens = 0
+        seen_descriptions: set[str] = set()
+        for edge in subgraph.edges:
+            if edge.description and edge.description not in seen_descriptions:
+                seen_descriptions.add(edge.description)
+                cost = self._estimate_tokens(edge.description)
+                if rel_tokens + cost > max_tokens:
+                    break
+                rel_tokens += cost
+                rel_descriptions.append(edge.description)
+
+        # Budget community summaries with remaining tokens.
+        comm_budget = max_tokens - rel_tokens
+        comm_summaries: list[str] = []
+        comm_tokens = 0
+        for summary in subgraph.community_summaries:
+            cost = self._estimate_tokens(summary)
+            if comm_tokens + cost > comm_budget:
+                break
+            comm_tokens += cost
+            comm_summaries.append(summary)
+
+        return rel_descriptions, comm_summaries, rel_tokens, comm_tokens
 
     def _retrieve_entities(
         self,

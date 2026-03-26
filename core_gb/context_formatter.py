@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from core_gb.context_enrichment import EnrichedContext
+from core_gb.prompt_templates import build_structured_system_prompt
 from core_gb.token_budget import TokenBudget
-from core_gb.types import Pattern
+from core_gb.types import Domain, Pattern
 
 _DEFAULT_PREAMBLE: str = "You are a helpful assistant."
 
@@ -54,30 +55,43 @@ class ContextFormatter:
         *,
         token_budget: TokenBudget | None = None,
         system_preamble: str = _DEFAULT_PREAMBLE,
+        domain: Domain = Domain.SYNTHESIS,
+        complexity: int = 1,
     ) -> None:
         self._budget = token_budget or TokenBudget(max_tokens=100_000)
         self._preamble = system_preamble
+        self._domain = domain
+        self._complexity = complexity
 
     def format(
         self,
         enriched: EnrichedContext,
         *,
         task: str,
+        domain: Domain | None = None,
+        complexity: int | None = None,
     ) -> list[dict[str, str]]:
         """Format enriched context into LLM-ready message dicts.
 
         Assembles sections from the enriched context, ranks them by
         activation score, trims to the token budget, and builds the
-        final message list.
+        final message list with XML-structured system prompt.
 
         Args:
             enriched: The enriched context from ContextEnricher.
             task: The user task / question to place as the final message.
+            domain: Override domain for prompt template selection.
+                Falls back to the instance default if not provided.
+            complexity: Override complexity for chain-of-thought activation.
+                Falls back to the instance default if not provided.
 
         Returns:
             A list of message dicts with "role" and "content" keys,
             ordered as: system message, conversation turns, user message.
         """
+        effective_domain = domain or self._domain
+        effective_complexity = complexity if complexity is not None else self._complexity
+
         # 1. Format all non-empty sections
         raw_sections = self._format_sections(enriched)
 
@@ -87,19 +101,24 @@ class ContextFormatter:
         # 3. Trim to budget
         trimmed = self._trim_to_budget(ranked)
 
-        # 4. Assemble system message from ranked, trimmed sections
-        system_parts: list[str] = [self._preamble]
+        # 4. Assemble context text from ranked, trimmed sections
+        context_parts: list[str] = []
         for section_def in trimmed:
-            system_parts.append("")
-            system_parts.append(section_def.text)
+            context_parts.append(section_def.text)
+        context_text = "\n\n".join(context_parts) if context_parts else ""
 
-        system_content = "\n".join(system_parts)
+        # 5. Build XML-structured system message
+        system_content = build_structured_system_prompt(
+            domain=effective_domain,
+            complexity=effective_complexity,
+            context_text=context_text,
+        )
 
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_content},
         ]
 
-        # 5. Add conversation turns as separate messages
+        # 6. Add conversation turns as separate messages
         if enriched.conversation_turns:
             for turn in enriched.conversation_turns:
                 messages.append({
@@ -107,10 +126,33 @@ class ContextFormatter:
                     "content": turn.get("content", ""),
                 })
 
-        # 6. Add the user task as the final message
+        # 7. Add the user task as the final message
         messages.append({"role": "user", "content": task})
 
         return messages
+
+    @staticmethod
+    def format_as_xml_document(
+        index: int,
+        source: str,
+        content: str,
+    ) -> str:
+        """Format a piece of context as an XML document element.
+
+        Args:
+            index: Document index (1-based).
+            source: Source identifier (e.g., "knowledge_graph", "memory").
+            content: The document content.
+
+        Returns:
+            XML-formatted document string.
+        """
+        return (
+            f'<document index="{index}">'
+            f"<source>{source}</source>"
+            f"<content>{content}</content>"
+            f"</document>"
+        )
 
     def _format_sections(
         self,
@@ -120,29 +162,60 @@ class ContextFormatter:
 
         Returns a dict mapping section name to formatted text. Empty
         sections (no data) are excluded.
+
+        Entity and relationship context is formatted as XML document
+        elements for structured retrieval.
         """
         sections: dict[str, str] = {}
+        doc_index = 1
 
-        # Entities
+        # Entities -- formatted as XML documents
         if enriched.entities:
-            lines: list[str] = ["Here is relevant background information:"]
+            docs: list[str] = []
             for entity in enriched.entities:
                 etype = entity.get("type", "")
                 name = entity.get("name", "")
                 details = entity.get("details", "")
-                lines.append(f"- {etype}: {name} -- {details}")
-            sections["entities"] = "\n".join(lines)
+                content = f"{etype}: {name} -- {details}"
+                docs.append(self.format_as_xml_document(
+                    doc_index, "knowledge_graph", content,
+                ))
+                doc_index += 1
+            sections["entities"] = "\n".join(docs)
 
-        # Memories
+        # Relationships -- formatted as XML documents
+        if enriched.relationship_descriptions:
+            docs = []
+            for desc in enriched.relationship_descriptions:
+                docs.append(self.format_as_xml_document(
+                    doc_index, "knowledge_graph", desc,
+                ))
+                doc_index += 1
+            sections["relationships"] = "\n".join(docs)
+
+        # Community summaries -- formatted as XML documents
+        if enriched.community_summaries:
+            docs = []
+            for summary in enriched.community_summaries:
+                docs.append(self.format_as_xml_document(
+                    doc_index, "knowledge_graph", summary,
+                ))
+                doc_index += 1
+            sections["communities"] = "\n".join(docs)
+
+        # Memories -- formatted as XML documents
         if enriched.memories:
-            lines = ["Relevant memories:"]
+            docs = []
             for memory in enriched.memories:
-                lines.append(f"- {memory}")
-            sections["memories"] = "\n".join(lines)
+                docs.append(self.format_as_xml_document(
+                    doc_index, "memory", memory,
+                ))
+                doc_index += 1
+            sections["memories"] = "\n".join(docs)
 
         # Reflections
         if enriched.reflections:
-            lines = ["Previous attempts at similar tasks failed because:"]
+            lines: list[str] = ["Previous attempts at similar tasks failed because:"]
             for refl in enriched.reflections:
                 task_desc = refl.get("task_description", "")
                 what_failed = refl.get("what_failed", "")
@@ -195,6 +268,8 @@ class ContextFormatter:
 
         activation_map: dict[str, int] = {
             "entities": enriched.entity_tokens,
+            "relationships": enriched.relationship_tokens,
+            "communities": enriched.community_tokens,
             "memories": enriched.memory_tokens,
             "reflections": enriched.reflection_tokens,
             "patterns": enriched.pattern_tokens,

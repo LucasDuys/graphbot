@@ -344,6 +344,8 @@ class TestContextEnricherFullPipeline:
             + ctx.reflection_tokens
             + ctx.pattern_tokens
             + ctx.conversation_tokens
+            + ctx.relationship_tokens
+            + ctx.community_tokens
         )
         assert ctx.total_tokens == expected
         store.close()
