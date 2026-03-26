@@ -18,6 +18,11 @@ from models.router import (
     CascadeResult,
     ModelRouter,
 )
+from models.smart_router import (
+    DailyCostTracker,
+    SmartModelRouter,
+    select_model,
+)
 
 setup_langsmith()
 
@@ -28,6 +33,7 @@ __all__ = [
     "CascadeResult",
     "DEFAULT_CASCADE_CHAIN",
     "DEFAULT_MODEL_MAP",
+    "DailyCostTracker",
     "GoogleProvider",
     "GroqProvider",
     "ModelProvider",
@@ -35,5 +41,7 @@ __all__ = [
     "OpenRouterProvider",
     "ProviderError",
     "RateLimitError",
+    "SmartModelRouter",
+    "select_model",
     "setup_langsmith",
 ]
