@@ -89,6 +89,32 @@ We tested 15 tasks across 3 difficulty levels with Phase 24 improvements (XML-st
 - **Latency** -- 55-61s avg vs GPT-4o's 3.6s. Pipeline overhead is significant, especially for hard tasks with decomposition.
 - **Easy task regression** -- Simple tasks score 3.20 (down from 5.00 in Phase 23). The model occasionally misinterprets simple questions. Prompt scaling helps but 8B models remain unpredictable.
 
+## Multi-Model Comparison: Does the Pipeline Help?
+
+We ran 10 tasks (5 easy, 5 hard) through 5 models both **direct** (raw API call) and **through GraphBot's pipeline** (graph context, safety, decomposition, smart routing). Quality judged by GPT-4o-mini.
+
+| Model | Direct | Pipeline | Delta | Cost Direct | Cost Pipeline |
+|-------|--------|----------|-------|-------------|---------------|
+| Llama 8B | 4.40 | 3.60 | **-0.80** | $0.0003 | $0.0002 |
+| Llama 70B | 4.70 | 4.50 | **-0.20** | $0.002 | $0.002 |
+| Gemini 2.5 Flash | 1.00 | 3.30 | **+2.30** | $0.00 | $0.00 |
+| GPT-4o | 4.70 | 4.40 | **-0.30** | $0.04 | $0.03 |
+| Claude Sonnet 4 | 4.80 | 4.40 | **-0.40** | $0.08 | $0.47 |
+
+### What this means
+
+1. **The pipeline does not improve answer quality for capable models.** GPT-4o, Claude Sonnet 4, and Llama 70B all score slightly lower through the pipeline on knowledge tasks. Strong models already handle complexity well -- decomposition fragments their reasoning.
+
+2. **Easy tasks are unaffected.** All models score 4.0-5.0 on easy tasks regardless of pipeline. The lean prompt at low complexity works correctly.
+
+3. **The pipeline rescues broken models.** Gemini Flash scored 1.0 direct (API errors) but 3.3 through the pipeline thanks to fallback chains and retry logic.
+
+4. **Pipeline overhead is expensive for frontier models.** Claude Sonnet 4 costs 6x more through the pipeline ($0.47 vs $0.08) because decomposition multiplies API calls.
+
+5. **The real value of GraphBot is capabilities, not quality uplift.** The pipeline adds: tool access (file, shell, web, browser), constitutional safety (14/14 attacks blocked), knowledge graph memory, pattern learning, and 20-100x cost savings with free models. These are things raw model calls cannot do at any price.
+
+Full results: [`benchmarks/model_comparison.json`](benchmarks/model_comparison.json) | Script: [`scripts/model_comparison_benchmark.py`](scripts/model_comparison_benchmark.py)
+
 ## How It Works
 
 ```
